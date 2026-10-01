@@ -1,0 +1,16 @@
+{
+  "version": "7.1",
+  "screens": [{
+    "id": "MENSAGEM",
+    "title": "Mensagem ao missionário",
+    "terminal": true,
+    "success": true,
+    "data": {},
+    "layout": {"type":"SingleColumnLayout","children":[{"type":"Form","name":"form","children":[
+      {"type":"Dropdown","label":"Missionário","name":"missionario_id","required":true,"data-source":[{"id":"joao-silva","title":"Élder João Silva"},{"id":"maria-souza","title":"Síster Maria Souza"}]},
+      {"type":"TextInput","label":"Nome da família","name":"familia","required":true},
+      {"type":"TextArea","label":"Mensagem","name":"mensagem","required":true},
+      {"type":"Footer","label":"Enviar mensagem","on-click-action":{"name":"complete","payload":{"missionario_id":"${form.missionario_id}","familia":"${form.familia}","mensagem":"${form.mensagem}"}}}
+    ]}]}
+  }]
+}
