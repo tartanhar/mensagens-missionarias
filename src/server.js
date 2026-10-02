@@ -1163,7 +1163,7 @@ async function enviarCompilacoesPendentes() {
       const resultadoEmail =
         await resend.emails.send({
           from:
-            "Mensagens Missionárias <onboarding@resend.dev>",
+            "Mensagens Missionárias <mensagens@mail.familycode.com.br>",
 
           to: [
             missionario
@@ -2103,7 +2103,7 @@ app.post(
         await resend.emails.send({
 
           from:
-            "Mensagens Missionárias <onboarding@resend.dev>",
+            "Mensagens Missionárias <mensagens@mail.familycode.com.br>",
 
           to: [
             emailTeste
