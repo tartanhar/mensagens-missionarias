@@ -48,7 +48,6 @@ async function inicializarBanco() {
       );
     `);
 
-    // Conversa atual de cada família.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS conversas (
         telefone TEXT PRIMARY KEY,
@@ -59,7 +58,6 @@ async function inicializarBanco() {
       );
     `);
 
-    // Mensagens definitivas destinadas aos missionários.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS mensagens_missionarios (
         id SERIAL PRIMARY KEY,
@@ -145,7 +143,7 @@ function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
     }
 
     main {
-      max-width: 1100px;
+      max-width: 1200px;
       margin: 30px auto;
       padding: 0 20px;
     }
@@ -213,6 +211,7 @@ function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
       padding: 12px;
       border-bottom: 1px solid #e5e7eb;
       text-align: left;
+      vertical-align: top;
     }
 
     th {
@@ -229,9 +228,25 @@ function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
       font-weight: bold;
     }
 
+    .pendente {
+      color: #b45309;
+      font-weight: bold;
+    }
+
+    .enviada {
+      color: #157347;
+      font-weight: bold;
+    }
+
     .login {
       max-width: 450px;
       margin: 80px auto;
+    }
+
+    .mensagem-texto {
+      max-width: 400px;
+      white-space: normal;
+      line-height: 1.5;
     }
 
     @media (max-width: 700px) {
@@ -313,6 +328,10 @@ function verificarAdmin(req, res, next) {
           <h2>
             Acesso administrativo
           </h2>
+
+          <p>
+            Digite a senha do painel.
+          </p>
 
           <form
             method="GET"
@@ -417,7 +436,7 @@ async function enviarMensagemWhatsApp(telefone, texto) {
 }
 
 // ======================================================
-// CONVERSA
+// CONTROLE DA CONVERSA
 // ======================================================
 
 async function buscarConversa(telefone) {
@@ -490,7 +509,9 @@ async function reiniciarConversa(telefone) {
 async function enviarListaMissionarios(telefone) {
 
   const resultado = await pool.query(`
-    SELECT id, nome
+    SELECT
+      id,
+      nome
     FROM missionarios
     WHERE ativo = TRUE
     ORDER BY nome ASC
@@ -510,11 +531,13 @@ async function enviarListaMissionarios(telefone) {
     "💙 *Mensagens Missionárias*\n\n" +
     "Para qual missionário você deseja enviar uma mensagem?\n\n";
 
-  resultado.rows.forEach((missionario, indice) => {
+  resultado.rows.forEach(
+    (missionario, indice) => {
 
-    texto +=
-      `${indice + 1} - ${missionario.nome}\n`;
-  });
+      texto +=
+        `${indice + 1} - ${missionario.nome}\n`;
+    }
+  );
 
   texto +=
     "\nDigite somente o número correspondente ao missionário.";
@@ -531,7 +554,7 @@ async function enviarListaMissionarios(telefone) {
 }
 
 // ======================================================
-// PROCESSAMENTO DO FLUXO DA FAMÍLIA
+// FLUXO DA FAMÍLIA
 // ======================================================
 
 async function processarConversa(
@@ -545,11 +568,13 @@ async function processarConversa(
   let conversa =
     await buscarConversa(telefone);
 
-  // Permite reiniciar o atendimento.
+  const comando =
+    mensagem.toLowerCase();
+
   if (
-    mensagem.toLowerCase() === "inicio" ||
-    mensagem.toLowerCase() === "início" ||
-    mensagem.toLowerCase() === "menu"
+    comando === "inicio" ||
+    comando === "início" ||
+    comando === "menu"
   ) {
 
     await reiniciarConversa(telefone);
@@ -557,9 +582,9 @@ async function processarConversa(
     conversa = null;
   }
 
-  // ----------------------------------------------------
+  // ====================================================
   // INÍCIO
-  // ----------------------------------------------------
+  // ====================================================
 
   if (!conversa) {
 
@@ -570,26 +595,37 @@ async function processarConversa(
       "Aqui você pode deixar uma mensagem para um missionário."
     );
 
-    await enviarListaMissionarios(telefone);
+    await enviarListaMissionarios(
+      telefone
+    );
 
     return;
   }
 
-  // ----------------------------------------------------
+  // ====================================================
   // ESCOLHA DO MISSIONÁRIO
-  // ----------------------------------------------------
+  // ====================================================
 
-  if (conversa.etapa === "AGUARDANDO_MISSIONARIO") {
+  if (
+    conversa.etapa ===
+    "AGUARDANDO_MISSIONARIO"
+  ) {
 
     const numero =
-      Number.parseInt(mensagem, 10);
+      Number.parseInt(
+        mensagem,
+        10
+      );
 
-    const resultado = await pool.query(`
-      SELECT id, nome
-      FROM missionarios
-      WHERE ativo = TRUE
-      ORDER BY nome ASC
-    `);
+    const resultado =
+      await pool.query(`
+        SELECT
+          id,
+          nome
+        FROM missionarios
+        WHERE ativo = TRUE
+        ORDER BY nome ASC
+      `);
 
     if (
       !Number.isInteger(numero) ||
@@ -626,11 +662,14 @@ async function processarConversa(
     return;
   }
 
-  // ----------------------------------------------------
+  // ====================================================
   // NOME DA FAMÍLIA
-  // ----------------------------------------------------
+  // ====================================================
 
-  if (conversa.etapa === "AGUARDANDO_FAMILIA") {
+  if (
+    conversa.etapa ===
+    "AGUARDANDO_FAMILIA"
+  ) {
 
     if (mensagem.length < 2) {
 
@@ -656,7 +695,9 @@ async function processarConversa(
         FROM missionarios
         WHERE id = $1
         `,
-        [conversa.missionario_id]
+        [
+          conversa.missionario_id
+        ]
       );
 
     await enviarMensagemWhatsApp(
@@ -668,11 +709,14 @@ async function processarConversa(
     return;
   }
 
-  // ----------------------------------------------------
+  // ====================================================
   // MENSAGEM PARA O MISSIONÁRIO
-  // ----------------------------------------------------
+  // ====================================================
 
-  if (conversa.etapa === "AGUARDANDO_MENSAGEM") {
+  if (
+    conversa.etapa ===
+    "AGUARDANDO_MENSAGEM"
+  ) {
 
     if (!mensagem) {
 
@@ -687,17 +731,25 @@ async function processarConversa(
     const missionario =
       await pool.query(
         `
-        SELECT id, nome
+        SELECT
+          id,
+          nome
         FROM missionarios
         WHERE id = $1
           AND ativo = TRUE
         `,
-        [conversa.missionario_id]
+        [
+          conversa.missionario_id
+        ]
       );
 
-    if (missionario.rowCount === 0) {
+    if (
+      missionario.rowCount === 0
+    ) {
 
-      await reiniciarConversa(telefone);
+      await reiniciarConversa(
+        telefone
+      );
 
       await enviarMensagemWhatsApp(
         telefone,
@@ -736,7 +788,9 @@ async function processarConversa(
       ]
     );
 
-    await reiniciarConversa(telefone);
+    await reiniciarConversa(
+      telefone
+    );
 
     await enviarMensagemWhatsApp(
       telefone,
@@ -755,12 +809,14 @@ async function processarConversa(
     return;
   }
 
-  // Caso haja algum estado inesperado.
-  await reiniciarConversa(telefone);
+  await reiniciarConversa(
+    telefone
+  );
 
   await enviarMensagemWhatsApp(
     telefone,
-    "Vamos começar novamente.\n\nDigite *menu*."
+    "Vamos começar novamente.\n\n" +
+    "Digite *menu*."
   );
 }
 
@@ -786,6 +842,10 @@ app.get(
 
     try {
 
+      // ----------------------------------------------
+      // MISSIONÁRIOS
+      // ----------------------------------------------
+
       const resultado =
         await pool.query(`
           SELECT
@@ -799,86 +859,206 @@ app.get(
           ORDER BY nome ASC
         `);
 
+      // ----------------------------------------------
+      // MENSAGENS RECEBIDAS
+      // ----------------------------------------------
+
+      const resultadoMensagens =
+        await pool.query(`
+          SELECT
+            mm.id,
+            mm.nome_familia,
+            mm.telefone_familia,
+            mm.mensagem,
+            mm.status,
+            mm.criado_em,
+            m.nome AS missionario_nome
+          FROM mensagens_missionarios mm
+
+          INNER JOIN missionarios m
+            ON m.id = mm.missionario_id
+
+          ORDER BY mm.criado_em DESC
+        `);
+
       const senha =
-        escaparHTML(req.query.senha || "");
+        escaparHTML(
+          req.query.senha || ""
+        );
+
+      // ----------------------------------------------
+      // LINHAS DOS MISSIONÁRIOS
+      // ----------------------------------------------
 
       const linhas =
-        resultado.rows.map((missionario) => {
+        resultado.rows
+          .map(
+            (missionario) => {
 
-          const status =
-            missionario.ativo
-              ? `<span class="ativo">Ativo</span>`
-              : `<span class="inativo">Inativo</span>`;
+              const status =
+                missionario.ativo
+                  ? `<span class="ativo">Ativo</span>`
+                  : `<span class="inativo">Inativo</span>`;
 
-          const novoStatus =
-            !missionario.ativo;
+              const novoStatus =
+                !missionario.ativo;
 
-          const classe =
-            missionario.ativo
-              ? "desativar"
-              : "ativar";
+              const classe =
+                missionario.ativo
+                  ? "desativar"
+                  : "ativar";
 
-          const texto =
-            missionario.ativo
-              ? "Desativar"
-              : "Ativar";
+              const texto =
+                missionario.ativo
+                  ? "Desativar"
+                  : "Ativar";
 
-          return `
-            <tr>
+              return `
+                <tr>
 
-              <td>
-                ${missionario.id}
-              </td>
+                  <td>
+                    ${missionario.id}
+                  </td>
 
-              <td>
-                ${escaparHTML(missionario.nome)}
-              </td>
+                  <td>
+                    ${escaparHTML(
+                      missionario.nome
+                    )}
+                  </td>
 
-              <td>
-                ${escaparHTML(missionario.email || "-")}
-              </td>
+                  <td>
+                    ${escaparHTML(
+                      missionario.email || "-"
+                    )}
+                  </td>
 
-              <td>
-                ${escaparHTML(missionario.telefone || "-")}
-              </td>
+                  <td>
+                    ${escaparHTML(
+                      missionario.telefone || "-"
+                    )}
+                  </td>
 
-              <td>
-                ${status}
-              </td>
+                  <td>
+                    ${status}
+                  </td>
 
-              <td>
+                  <td>
 
-                <form
-                  method="POST"
-                  action="/admin/missionarios/${missionario.id}/status"
-                >
+                    <form
+                      method="POST"
+                      action="/admin/missionarios/${missionario.id}/status"
+                    >
 
-                  <input
-                    type="hidden"
-                    name="senha_admin"
-                    value="${senha}"
+                      <input
+                        type="hidden"
+                        name="senha_admin"
+                        value="${senha}"
+                      >
+
+                      <input
+                        type="hidden"
+                        name="ativo"
+                        value="${novoStatus}"
+                      >
+
+                      <button
+                        class="${classe}"
+                        type="submit"
+                      >
+                        ${texto}
+                      </button>
+
+                    </form>
+
+                  </td>
+
+                </tr>
+              `;
+            }
+          )
+          .join("");
+
+      // ----------------------------------------------
+      // LINHAS DAS MENSAGENS
+      // ----------------------------------------------
+
+      const linhasMensagens =
+        resultadoMensagens.rows
+          .map(
+            (item) => {
+
+              const data =
+                new Date(
+                  item.criado_em
+                ).toLocaleString(
+                  "pt-BR",
+                  {
+                    timeZone:
+                      "America/Sao_Paulo"
+                  }
+                );
+
+              let classeStatus =
+                "pendente";
+
+              if (
+                item.status ===
+                "ENVIADA"
+              ) {
+                classeStatus =
+                  "enviada";
+              }
+
+              return `
+                <tr>
+
+                  <td>
+                    ${item.id}
+                  </td>
+
+                  <td>
+                    ${escaparHTML(
+                      item.missionario_nome
+                    )}
+                  </td>
+
+                  <td>
+                    ${escaparHTML(
+                      item.nome_familia
+                    )}
+                  </td>
+
+                  <td
+                    class="mensagem-texto"
                   >
+                    ${escaparHTML(
+                      item.mensagem
+                    )}
+                  </td>
 
-                  <input
-                    type="hidden"
-                    name="ativo"
-                    value="${novoStatus}"
-                  >
+                  <td>
+                    ${escaparHTML(data)}
+                  </td>
 
-                  <button
-                    class="${classe}"
-                    type="submit"
-                  >
-                    ${texto}
-                  </button>
+                  <td>
+                    <span
+                      class="${classeStatus}"
+                    >
+                      ${escaparHTML(
+                        item.status
+                      )}
+                    </span>
+                  </td>
 
-                </form>
+                </tr>
+              `;
+            }
+          )
+          .join("");
 
-              </td>
-
-            </tr>
-          `;
-        }).join("");
+      // ----------------------------------------------
+      // HTML DO PAINEL
+      // ----------------------------------------------
 
       res.send(
         paginaHTML(`
@@ -980,6 +1160,51 @@ app.get(
 
           </div>
 
+          <div class="card">
+
+            <h2>
+              Mensagens recebidas
+            </h2>
+
+            <p>
+              Mensagens enviadas pelas famílias
+              e destinadas aos missionários.
+            </p>
+
+            <table>
+
+              <thead>
+
+                <tr>
+                  <th>ID</th>
+                  <th>Missionário</th>
+                  <th>Família</th>
+                  <th>Mensagem</th>
+                  <th>Recebida em</th>
+                  <th>Status</th>
+                </tr>
+
+              </thead>
+
+              <tbody>
+
+                ${
+                  linhasMensagens ||
+                  `
+                  <tr>
+                    <td colspan="6">
+                      Nenhuma mensagem recebida.
+                    </td>
+                  </tr>
+                  `
+                }
+
+              </tbody>
+
+            </table>
+
+          </div>
+
         `)
       );
 
@@ -1022,7 +1247,10 @@ app.post(
         );
       }
 
-      if (!email?.trim() && !telefone?.trim()) {
+      if (
+        !email?.trim() &&
+        !telefone?.trim()
+      ) {
 
         return res.status(400).send(
           "Informe e-mail ou telefone."
@@ -1053,12 +1281,16 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(senha_admin)}`
+        `/admin?senha=${encodeURIComponent(
+          senha_admin
+        )}`
       );
 
     } catch (error) {
 
-      if (error.code === "23505") {
+      if (
+        error.code === "23505"
+      ) {
 
         return res.status(409).send(
           "Já existe um missionário com esse telefone."
@@ -1078,7 +1310,7 @@ app.post(
 );
 
 // ======================================================
-// ATIVAR / DESATIVAR
+// ATIVAR / DESATIVAR MISSIONÁRIO
 // ======================================================
 
 app.post(
@@ -1104,7 +1336,9 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(req.body.senha_admin)}`
+        `/admin?senha=${encodeURIComponent(
+          req.body.senha_admin
+        )}`
       );
 
     } catch (error) {
@@ -1125,152 +1359,189 @@ app.post(
 // VERIFICAÇÃO DO WEBHOOK
 // ======================================================
 
-app.get("/webhook", (req, res) => {
+app.get(
+  "/webhook",
+  (req, res) => {
 
-  const mode =
-    req.query["hub.mode"];
+    const mode =
+      req.query["hub.mode"];
 
-  const token =
-    req.query["hub.verify_token"];
+    const token =
+      req.query["hub.verify_token"];
 
-  const challenge =
-    req.query["hub.challenge"];
+    const challenge =
+      req.query["hub.challenge"];
 
-  if (
-    mode === "subscribe" &&
-    token === VERIFY_TOKEN
-  ) {
+    if (
+      mode === "subscribe" &&
+      token === VERIFY_TOKEN
+    ) {
 
-    console.log(
-      "Webhook verificado com sucesso."
-    );
+      console.log(
+        "Webhook verificado com sucesso."
+      );
 
-    return res.status(200).send(challenge);
+      return res
+        .status(200)
+        .send(challenge);
+    }
+
+    return res.sendStatus(403);
   }
-
-  return res.sendStatus(403);
-});
+);
 
 // ======================================================
 // WEBHOOK DO WHATSAPP
 // ======================================================
 
-app.post("/webhook", async (req, res) => {
+app.post(
+  "/webhook",
+  async (req, res) => {
 
-  // Confirma imediatamente o recebimento para a Meta.
-  res.sendStatus(200);
+    // Confirma imediatamente para a Meta.
+    res.sendStatus(200);
 
-  try {
+    try {
 
-    const value =
-      req.body
-        ?.entry?.[0]
-        ?.changes?.[0]
-        ?.value;
+      const value =
+        req.body
+          ?.entry?.[0]
+          ?.changes?.[0]
+          ?.value;
 
-    const message =
-      value?.messages?.[0];
+      const message =
+        value?.messages?.[0];
 
-    const contact =
-      value?.contacts?.[0];
+      const contact =
+        value?.contacts?.[0];
 
-    // Atualizações de status não entram no fluxo.
-    if (!message) {
-      return;
-    }
+      // Eventos de status não entram no fluxo.
+      if (!message) {
+        return;
+      }
 
-    const whatsappMessageId =
-      message.id;
+      const whatsappMessageId =
+        message.id;
 
-    const telefone =
-      message.from;
+      const telefone =
+        message.from;
 
-    const nome =
-      contact?.profile?.name ||
-      "Sem nome";
+      const nome =
+        contact?.profile?.name ||
+        "Sem nome";
 
-    const tipo =
-      message.type ||
-      "desconhecido";
+      const tipo =
+        message.type ||
+        "desconhecido";
 
-    const texto =
-      message.text?.body || "";
-
-    console.log("Nova mensagem recebida:");
-    console.log(`Nome: ${nome}`);
-    console.log(`Telefone: ${telefone}`);
-    console.log(`Mensagem: ${texto}`);
-    console.log(`Tipo: ${tipo}`);
-
-    // Registra o webhook bruto e evita processar
-    // novamente a mesma mensagem.
-    const registro =
-      await pool.query(
-        `
-        INSERT INTO mensagens
-        (
-          whatsapp_message_id,
-          nome,
-          telefone,
-          mensagem,
-          tipo
-        )
-
-        VALUES
-        ($1, $2, $3, $4, $5)
-
-        ON CONFLICT
-        (whatsapp_message_id)
-        DO NOTHING
-
-        RETURNING id
-        `,
-        [
-          whatsappMessageId,
-          nome,
-          telefone,
-          texto,
-          tipo
-        ]
-      );
-
-    if (registro.rowCount === 0) {
+      const texto =
+        message.text?.body || "";
 
       console.log(
-        "Mensagem já processada anteriormente."
+        "Nova mensagem recebida:"
       );
 
-      return;
-    }
+      console.log(
+        `Nome: ${nome}`
+      );
 
-    console.log(
-      "Mensagem salva no banco de dados."
-    );
+      console.log(
+        `Telefone: ${telefone}`
+      );
 
-    if (tipo !== "text") {
+      console.log(
+        `Mensagem: ${texto}`
+      );
 
-      await enviarMensagemWhatsApp(
+      console.log(
+        `Tipo: ${tipo}`
+      );
+
+      // ----------------------------------------------
+      // REGISTRA A MENSAGEM RECEBIDA
+      // ----------------------------------------------
+
+      const registro =
+        await pool.query(
+          `
+          INSERT INTO mensagens
+          (
+            whatsapp_message_id,
+            nome,
+            telefone,
+            mensagem,
+            tipo
+          )
+
+          VALUES
+          ($1, $2, $3, $4, $5)
+
+          ON CONFLICT
+          (whatsapp_message_id)
+          DO NOTHING
+
+          RETURNING id
+          `,
+          [
+            whatsappMessageId,
+            nome,
+            telefone,
+            texto,
+            tipo
+          ]
+        );
+
+      // Evita processar novamente a mesma mensagem.
+      if (
+        registro.rowCount === 0
+      ) {
+
+        console.log(
+          "Mensagem já processada anteriormente."
+        );
+
+        return;
+      }
+
+      console.log(
+        "Mensagem salva no banco de dados."
+      );
+
+      // ----------------------------------------------
+      // SOMENTE TEXTO NESTA VERSÃO
+      // ----------------------------------------------
+
+      if (
+        tipo !== "text"
+      ) {
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Por enquanto, envie sua mensagem em formato de texto."
+        );
+
+        return;
+      }
+
+      // ----------------------------------------------
+      // PROCESSA O FLUXO DA FAMÍLIA
+      // ----------------------------------------------
+
+      await processarConversa(
         telefone,
-        "Por enquanto, envie sua mensagem em formato de texto."
+        texto,
+        whatsappMessageId
       );
 
-      return;
+    } catch (error) {
+
+      console.error(
+        "Erro ao processar webhook:",
+        error
+      );
     }
-
-    await processarConversa(
-      telefone,
-      texto,
-      whatsappMessageId
-    );
-
-  } catch (error) {
-
-    console.error(
-      "Erro ao processar webhook:",
-      error
-    );
   }
-});
+);
 
 // ======================================================
 // INICIALIZAÇÃO
@@ -1282,13 +1553,16 @@ async function iniciarServidor() {
 
     await inicializarBanco();
 
-    app.listen(PORT, () => {
+    app.listen(
+      PORT,
+      () => {
 
-      console.log(
-        `Servidor iniciado na porta ${PORT}`
-      );
+        console.log(
+          `Servidor iniciado na porta ${PORT}`
+        );
 
-    });
+      }
+    );
 
   } catch (error) {
 
