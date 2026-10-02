@@ -4,13 +4,16 @@ import pg from "pg";
 const { Pool } = pg;
 
 const app = express();
+
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
 // ======================================================
 // POSTGRESQL
@@ -22,7 +25,6 @@ const pool = new Pool({
 
 async function inicializarBanco() {
   try {
-    // Mensagens recebidas pelo WhatsApp
     await pool.query(`
       CREATE TABLE IF NOT EXISTS mensagens (
         id SERIAL PRIMARY KEY,
@@ -35,7 +37,6 @@ async function inicializarBanco() {
       );
     `);
 
-    // Missionários cadastrados pelo administrador
     await pool.query(`
       CREATE TABLE IF NOT EXISTS missionarios (
         id SERIAL PRIMARY KEY,
@@ -57,60 +58,700 @@ async function inicializarBanco() {
 }
 
 // ======================================================
-// ENVIO PELO WHATSAPP
+// FUNÇÕES AUXILIARES
 // ======================================================
 
-async function enviarMensagemWhatsApp(telefone, texto) {
+function escaparHTML(valor = "") {
+  return String(valor)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
+  return `
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>${escaparHTML(titulo)}</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+      color: #1f2937;
+    }
+
+    header {
+      background: #173b57;
+      color: white;
+      padding: 24px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 26px;
+    }
+
+    header p {
+      margin: 6px 0 0;
+      opacity: 0.85;
+    }
+
+    main {
+      max-width: 1100px;
+      margin: 30px auto;
+      padding: 0 20px;
+    }
+
+    .card {
+      background: white;
+      padding: 24px;
+      margin-bottom: 24px;
+      border-radius: 10px;
+      box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+
+    h2 {
+      margin-top: 0;
+    }
+
+    label {
+      display: block;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+
+    input {
+      width: 100%;
+      padding: 11px;
+      margin-top: 6px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 15px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .principal {
+      margin-top: 20px;
+      background: #173b57;
+      color: white;
+    }
+
+    .ativar {
+      background: #157347;
+      color: white;
+    }
+
+    .desativar {
+      background: #b42318;
+      color: white;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    th,
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+    }
+
+    th {
+      background: #f8fafc;
+    }
+
+    .ativo {
+      color: #157347;
+      font-weight: bold;
+    }
+
+    .inativo {
+      color: #b42318;
+      font-weight: bold;
+    }
+
+    .erro {
+      color: #b42318;
+      font-weight: bold;
+    }
+
+    .sucesso {
+      color: #157347;
+      font-weight: bold;
+    }
+
+    .login {
+      max-width: 450px;
+      margin: 80px auto;
+    }
+
+    @media (max-width: 700px) {
+      table,
+      thead,
+      tbody,
+      th,
+      td,
+      tr {
+        display: block;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tr {
+        margin-bottom: 18px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 10px;
+      }
+
+      td {
+        border: 0;
+        padding: 7px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+<header>
+  <h1>Mensagens Missionárias</h1>
+  <p>Painel administrativo</p>
+</header>
+
+<main>
+  ${conteudo}
+</main>
+
+</body>
+</html>
+`;
+}
+
+// ======================================================
+// AUTENTICAÇÃO SIMPLES DO PAINEL
+// ======================================================
+
+function verificarAdmin(req, res, next) {
+  const senha =
+    req.headers["x-admin-password"] ||
+    req.query.senha ||
+    req.body?.senha_admin;
+
+  if (!ADMIN_PASSWORD) {
+    return res.status(500).send(
+      "ADMIN_PASSWORD não configurado."
+    );
+  }
+
+  if (senha !== ADMIN_PASSWORD) {
+    return res.status(401).send(
+      paginaHTML(`
+        <div class="card login">
+
+          <h2>Acesso administrativo</h2>
+
+          <p>
+            Digite a senha do painel.
+          </p>
+
+          <form
+            method="GET"
+            action="/admin"
+          >
+
+            <label>
+              Senha
+            </label>
+
+            <input
+              type="password"
+              name="senha"
+              required
+            >
+
+            <button
+              class="principal"
+              type="submit"
+            >
+              Entrar
+            </button>
+
+          </form>
+
+        </div>
+      `, "Login - Mensagens Missionárias")
+    );
+  }
+
+  next();
+}
+
+// ======================================================
+// PÁGINA PRINCIPAL
+// ======================================================
+
+app.get("/", (req, res) => {
+  res.status(200).send(`
+    Mensagens Missionárias - servidor online
+  `);
+});
+
+// ======================================================
+// PAINEL ADMINISTRATIVO
+// ======================================================
+
+app.get(
+  "/admin",
+  verificarAdmin,
+  async (req, res) => {
+
+    try {
+      const resultado =
+        await pool.query(`
+          SELECT
+            id,
+            nome,
+            email,
+            telefone,
+            ativo,
+            criado_em
+          FROM missionarios
+          ORDER BY nome ASC
+        `);
+
+      const senha =
+        escaparHTML(req.query.senha || "");
+
+      const linhas =
+        resultado.rows.map(
+          (missionario) => {
+
+            const status =
+              missionario.ativo
+                ? `<span class="ativo">Ativo</span>`
+                : `<span class="inativo">Inativo</span>`;
+
+            const novoStatus =
+              !missionario.ativo;
+
+            const classeBotao =
+              missionario.ativo
+                ? "desativar"
+                : "ativar";
+
+            const textoBotao =
+              missionario.ativo
+                ? "Desativar"
+                : "Ativar";
+
+            return `
+              <tr>
+
+                <td>
+                  ${missionario.id}
+                </td>
+
+                <td>
+                  ${escaparHTML(
+                    missionario.nome
+                  )}
+                </td>
+
+                <td>
+                  ${escaparHTML(
+                    missionario.email || "-"
+                  )}
+                </td>
+
+                <td>
+                  ${escaparHTML(
+                    missionario.telefone || "-"
+                  )}
+                </td>
+
+                <td>
+                  ${status}
+                </td>
+
+                <td>
+
+                  <form
+                    method="POST"
+                    action="/admin/missionarios/${missionario.id}/status"
+                  >
+
+                    <input
+                      type="hidden"
+                      name="senha_admin"
+                      value="${senha}"
+                    >
+
+                    <input
+                      type="hidden"
+                      name="ativo"
+                      value="${novoStatus}"
+                    >
+
+                    <button
+                      class="${classeBotao}"
+                      type="submit"
+                    >
+                      ${textoBotao}
+                    </button>
+
+                  </form>
+
+                </td>
+
+              </tr>
+            `;
+          }
+        )
+        .join("");
+
+      const conteudo = `
+
+        <div class="card">
+
+          <h2>
+            Cadastrar missionário
+          </h2>
+
+          <form
+            method="POST"
+            action="/admin/missionarios"
+          >
+
+            <input
+              type="hidden"
+              name="senha_admin"
+              value="${senha}"
+            >
+
+            <label>
+              Nome do missionário
+            </label>
+
+            <input
+              type="text"
+              name="nome"
+              required
+            >
+
+            <label>
+              E-mail
+            </label>
+
+            <input
+              type="email"
+              name="email"
+            >
+
+            <label>
+              WhatsApp / telefone
+            </label>
+
+            <input
+              type="text"
+              name="telefone"
+              placeholder="5513999999999"
+            >
+
+            <button
+              class="principal"
+              type="submit"
+            >
+              Cadastrar missionário
+            </button>
+
+          </form>
+
+        </div>
+
+        <div class="card">
+
+          <h2>
+            Missionários cadastrados
+          </h2>
+
+          <table>
+
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nome</th>
+                <th>E-mail</th>
+                <th>Telefone</th>
+                <th>Status</th>
+                <th>Ação</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              ${
+                linhas ||
+                `
+                <tr>
+                  <td colspan="6">
+                    Nenhum missionário cadastrado.
+                  </td>
+                </tr>
+                `
+              }
+            </tbody>
+
+          </table>
+
+        </div>
+      `;
+
+      res.send(
+        paginaHTML(
+          conteudo,
+          "Painel - Mensagens Missionárias"
+        )
+      );
+
+    } catch (error) {
+      console.error(
+        "Erro ao carregar painel:",
+        error
+      );
+
+      res.status(500).send(
+        "Erro ao carregar painel."
+      );
+    }
+  }
+);
+
+// ======================================================
+// CADASTRO PELO PAINEL
+// ======================================================
+
+app.post(
+  "/admin/missionarios",
+  verificarAdmin,
+  async (req, res) => {
+
+    try {
+      const {
+        nome,
+        email,
+        telefone,
+        senha_admin
+      } = req.body;
+
+      if (!nome?.trim()) {
+        return res.status(400).send(
+          "Nome obrigatório."
+        );
+      }
+
+      if (!email?.trim() && !telefone?.trim()) {
+        return res.status(400).send(
+          "Informe e-mail ou telefone."
+        );
+      }
+
+      await pool.query(
+        `
+        INSERT INTO missionarios
+        (
+          nome,
+          email,
+          telefone
+        )
+        VALUES ($1, $2, $3)
+        `,
+        [
+          nome.trim(),
+          email?.trim() || null,
+          telefone?.trim() || null
+        ]
+      );
+
+      console.log(
+        `Missionário cadastrado: ${nome}`
+      );
+
+      res.redirect(
+        `/admin?senha=${encodeURIComponent(
+          senha_admin
+        )}`
+      );
+
+    } catch (error) {
+
+      if (error.code === "23505") {
+        return res.status(409).send(
+          "Já existe um missionário com esse telefone."
+        );
+      }
+
+      console.error(
+        "Erro ao cadastrar missionário:",
+        error
+      );
+
+      res.status(500).send(
+        "Erro ao cadastrar missionário."
+      );
+    }
+  }
+);
+
+// ======================================================
+// ATIVAR / DESATIVAR PELO PAINEL
+// ======================================================
+
+app.post(
+  "/admin/missionarios/:id/status",
+  verificarAdmin,
+  async (req, res) => {
+
+    try {
+      const id = req.params.id;
+
+      const ativo =
+        req.body.ativo === "true";
+
+      await pool.query(
+        `
+        UPDATE missionarios
+        SET ativo = $1
+        WHERE id = $2
+        `,
+        [
+          ativo,
+          id
+        ]
+      );
+
+      res.redirect(
+        `/admin?senha=${encodeURIComponent(
+          req.body.senha_admin
+        )}`
+      );
+
+    } catch (error) {
+      console.error(
+        "Erro ao alterar status:",
+        error
+      );
+
+      res.status(500).send(
+        "Erro ao alterar missionário."
+      );
+    }
+  }
+);
+
+// ======================================================
+// WHATSAPP
+// ======================================================
+
+async function enviarMensagemWhatsApp(
+  telefone,
+  texto
+) {
+
   if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
     console.error(
-      "WHATSAPP_TOKEN ou PHONE_NUMBER_ID não configurado."
+      "Configuração do WhatsApp incompleta."
     );
+
     return false;
   }
 
   try {
-    const resposta = await fetch(
-      `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          recipient_type: "individual",
-          to: telefone,
-          type: "text",
-          text: {
-            preview_url: false,
-            body: texto
-          }
-        })
-      }
-    );
+    const resposta =
+      await fetch(
+        `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
+        {
+          method: "POST",
 
-    const resultado = await resposta.json();
+          headers: {
+            Authorization:
+              `Bearer ${WHATSAPP_TOKEN}`,
+
+            "Content-Type":
+              "application/json"
+          },
+
+          body: JSON.stringify({
+            messaging_product:
+              "whatsapp",
+
+            recipient_type:
+              "individual",
+
+            to: telefone,
+
+            type: "text",
+
+            text: {
+              preview_url: false,
+              body: texto
+            }
+          })
+        }
+      );
+
+    const resultado =
+      await resposta.json();
 
     if (!resposta.ok) {
       console.error(
         "Erro da API do WhatsApp:",
-        JSON.stringify(resultado, null, 2)
+        JSON.stringify(
+          resultado,
+          null,
+          2
+        )
       );
+
       return false;
     }
 
-    console.log("Resposta enviada pelo WhatsApp.");
     console.log(
-      "ID da mensagem enviada:",
-      resultado?.messages?.[0]?.id || "não informado"
+      "Mensagem enviada pelo WhatsApp."
     );
 
     return true;
 
   } catch (error) {
     console.error(
-      "Erro ao enviar mensagem pelo WhatsApp:",
+      "Erro ao enviar WhatsApp:",
       error
     );
 
@@ -119,340 +760,166 @@ async function enviarMensagemWhatsApp(telefone, texto) {
 }
 
 // ======================================================
-// PÁGINA PRINCIPAL
+// VERIFICAÇÃO DO WEBHOOK
 // ======================================================
 
-app.get("/", (req, res) => {
-  res.status(200).send(
-    "Mensagens Missionárias - servidor online"
-  );
-});
+app.get(
+  "/webhook",
+  (req, res) => {
 
-// ======================================================
-// API - LISTAR MISSIONÁRIOS
-// ======================================================
+    const mode =
+      req.query["hub.mode"];
 
-app.get("/missionarios", async (req, res) => {
-  try {
-    const resultado = await pool.query(`
-      SELECT
-        id,
-        nome,
-        email,
-        telefone,
-        ativo,
-        criado_em
-      FROM missionarios
-      ORDER BY nome ASC
-    `);
+    const token =
+      req.query["hub.verify_token"];
 
-    res.json(resultado.rows);
+    const challenge =
+      req.query["hub.challenge"];
 
-  } catch (error) {
-    console.error(
-      "Erro ao listar missionários:",
-      error
-    );
+    if (
+      mode === "subscribe" &&
+      token === VERIFY_TOKEN
+    ) {
 
-    res.status(500).json({
-      erro: "Erro ao listar missionários."
-    });
-  }
-});
-
-// ======================================================
-// API - CADASTRAR MISSIONÁRIO
-// ======================================================
-
-app.post("/missionarios", async (req, res) => {
-  try {
-    const {
-      nome,
-      email,
-      telefone
-    } = req.body;
-
-    if (!nome || nome.trim() === "") {
-      return res.status(400).json({
-        erro: "O nome do missionário é obrigatório."
-      });
-    }
-
-    if (!email && !telefone) {
-      return res.status(400).json({
-        erro:
-          "Informe pelo menos o e-mail ou telefone do missionário."
-      });
-    }
-
-    const resultado = await pool.query(
-      `
-      INSERT INTO missionarios
-      (
-        nome,
-        email,
-        telefone
-      )
-      VALUES ($1, $2, $3)
-
-      RETURNING
-        id,
-        nome,
-        email,
-        telefone,
-        ativo,
-        criado_em
-      `,
-      [
-        nome.trim(),
-        email?.trim() || null,
-        telefone?.trim() || null
-      ]
-    );
-
-    console.log(
-      `Missionário cadastrado: ${nome}`
-    );
-
-    res.status(201).json(
-      resultado.rows[0]
-    );
-
-  } catch (error) {
-
-    // Telefone duplicado
-    if (error.code === "23505") {
-      return res.status(409).json({
-        erro:
-          "Já existe um missionário cadastrado com esse telefone."
-      });
-    }
-
-    console.error(
-      "Erro ao cadastrar missionário:",
-      error
-    );
-
-    res.status(500).json({
-      erro: "Erro ao cadastrar missionário."
-    });
-  }
-});
-
-// ======================================================
-// API - ATIVAR / DESATIVAR MISSIONÁRIO
-// ======================================================
-
-app.patch(
-  "/missionarios/:id/status",
-  async (req, res) => {
-
-    try {
-      const id = req.params.id;
-      const { ativo } = req.body;
-
-      if (typeof ativo !== "boolean") {
-        return res.status(400).json({
-          erro:
-            "O campo ativo deve ser true ou false."
-        });
-      }
-
-      const resultado = await pool.query(
-        `
-        UPDATE missionarios
-        SET ativo = $1
-        WHERE id = $2
-
-        RETURNING
-          id,
-          nome,
-          email,
-          telefone,
-          ativo
-        `,
-        [ativo, id]
+      console.log(
+        "Webhook verificado."
       );
 
-      if (resultado.rowCount === 0) {
-        return res.status(404).json({
-          erro: "Missionário não encontrado."
-        });
-      }
-
-      res.json(resultado.rows[0]);
-
-    } catch (error) {
-      console.error(
-        "Erro ao alterar missionário:",
-        error
-      );
-
-      res.status(500).json({
-        erro:
-          "Erro ao alterar status do missionário."
-      });
+      return res
+        .status(200)
+        .send(challenge);
     }
+
+    return res.sendStatus(403);
   }
 );
 
 // ======================================================
-// VERIFICAÇÃO DO WEBHOOK DA META
+// RECEBIMENTO DO WHATSAPP
 // ======================================================
 
-app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+app.post(
+  "/webhook",
+  async (req, res) => {
 
-  if (
-    mode === "subscribe" &&
-    token === VERIFY_TOKEN
-  ) {
-    console.log(
-      "Webhook verificado com sucesso."
-    );
+    res.sendStatus(200);
 
-    return res.status(200).send(challenge);
-  }
+    try {
+      const value =
+        req.body
+          ?.entry?.[0]
+          ?.changes?.[0]
+          ?.value;
 
-  return res.sendStatus(403);
-});
+      const message =
+        value?.messages?.[0];
 
-// ======================================================
-// RECEBIMENTO DAS MENSAGENS
-// ======================================================
+      const contact =
+        value?.contacts?.[0];
 
-app.post("/webhook", async (req, res) => {
+      if (!message) {
+        return;
+      }
 
-  // Confirma imediatamente para a Meta.
-  res.sendStatus(200);
+      const whatsappMessageId =
+        message.id;
 
-  try {
-    const value =
-      req.body?.entry?.[0]?.changes?.[0]?.value;
+      const telefone =
+        message.from;
 
-    const message =
-      value?.messages?.[0];
+      const nome =
+        contact?.profile?.name ||
+        "Sem nome";
 
-    const contact =
-      value?.contacts?.[0];
+      const tipo =
+        message.type ||
+        "desconhecido";
 
-    // Eventos de status não possuem message.
-    if (!message) {
-      return;
-    }
+      let texto = "";
 
-    const whatsappMessageId =
-      message.id;
+      if (tipo === "text") {
+        texto =
+          message.text?.body || "";
+      }
 
-    const telefone =
-      message.from;
+      const resultado =
+        await pool.query(
+          `
+          INSERT INTO mensagens
+          (
+            whatsapp_message_id,
+            nome,
+            telefone,
+            mensagem,
+            tipo
+          )
 
-    const nome =
-      contact?.profile?.name ||
-      "Sem nome";
+          VALUES
+          ($1, $2, $3, $4, $5)
 
-    const tipo =
-      message.type ||
-      "desconhecido";
+          ON CONFLICT
+          (whatsapp_message_id)
+          DO NOTHING
 
-    let texto = "";
+          RETURNING id
+          `,
+          [
+            whatsappMessageId,
+            nome,
+            telefone,
+            texto,
+            tipo
+          ]
+        );
 
-    if (message.type === "text") {
-      texto =
-        message.text?.body || "";
-    }
+      if (resultado.rowCount === 0) {
+        return;
+      }
 
-    console.log(
-      "Nova mensagem recebida:"
-    );
-
-    console.log(`Nome: ${nome}`);
-    console.log(`Telefone: ${telefone}`);
-    console.log(`Mensagem: ${texto}`);
-    console.log(`Tipo: ${tipo}`);
-
-    const resultadoBanco =
-      await pool.query(
-        `
-        INSERT INTO mensagens
-        (
-          whatsapp_message_id,
-          nome,
-          telefone,
-          mensagem,
-          tipo
-        )
-
-        VALUES ($1, $2, $3, $4, $5)
-
-        ON CONFLICT
-        (whatsapp_message_id)
-        DO NOTHING
-
-        RETURNING id
-        `,
-        [
-          whatsappMessageId,
-          nome,
-          telefone,
-          texto,
-          tipo
-        ]
-      );
-
-    if (
-      resultadoBanco.rowCount === 0
-    ) {
       console.log(
-        "Mensagem já processada anteriormente."
+        "Mensagem salva no banco de dados."
       );
 
-      return;
-    }
+      if (tipo === "text") {
 
-    console.log(
-      "Mensagem salva no banco de dados."
-    );
+        const resposta =
+          `Olá, ${nome}! 👋\n\n` +
+          `Bem-vindo ao Mensagens Missionárias.\n\n` +
+          `Em breve você poderá escolher o missionário e enviar sua mensagem.`;
 
-    // Mantemos a confirmação automática
-    // apenas enquanto construímos o fluxo definitivo.
-    if (message.type === "text") {
+        await enviarMensagemWhatsApp(
+          telefone,
+          resposta
+        );
+      }
 
-      const respostaAutomatica =
-        `Olá, ${nome}! 👋\n\n` +
-        `Sua mensagem foi recebida pelo ` +
-        `Mensagens Missionárias.\n\n` +
-        `Em breve você poderá selecionar ` +
-        `o missionário e enviar sua mensagem.`;
-
-      await enviarMensagemWhatsApp(
-        telefone,
-        respostaAutomatica
+    } catch (error) {
+      console.error(
+        "Erro no webhook:",
+        error
       );
     }
-
-  } catch (error) {
-    console.error(
-      "Erro ao processar webhook:",
-      error
-    );
   }
-});
+);
 
 // ======================================================
 // INICIALIZAÇÃO
 // ======================================================
 
 async function iniciarServidor() {
+
   await inicializarBanco();
 
-  app.listen(PORT, () => {
-    console.log(
-      `Servidor iniciado na porta ${PORT}`
-    );
-  });
+  app.listen(
+    PORT,
+    () => {
+
+      console.log(
+        `Servidor iniciado na porta ${PORT}`
+      );
+
+    }
+  );
 }
 
 iniciarServidor();
