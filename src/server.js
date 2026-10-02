@@ -2298,3 +2298,5 @@ app.post(
       }
 
       console.log(
+
+        iniciarServidor();
