@@ -29,10 +29,31 @@ app.get("/webhook", (req, res) => {
 
 // Recebimento das mensagens do WhatsApp
 app.post("/webhook", (req, res) => {
-  console.log("Webhook recebido:");
-  console.log(JSON.stringify(req.body, null, 2));
+  try {
+    const value = req.body?.entry?.[0]?.changes?.[0]?.value;
 
-  res.sendStatus(200);
+    const message = value?.messages?.[0];
+    const contact = value?.contacts?.[0];
+
+    if (message) {
+      const telefone = message.from;
+      const nome = contact?.profile?.name || "Sem nome";
+      const texto = message.text?.body || "";
+
+      console.log("Nova mensagem recebida:");
+      console.log(`Nome: ${nome}`);
+      console.log(`Telefone: ${telefone}`);
+      console.log(`Mensagem: ${texto}`);
+    }
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("Erro ao processar webhook:", error);
+
+    // Retornamos 200 para evitar que a Meta fique reenviando
+    // o mesmo webhook por causa de um erro interno.
+    res.sendStatus(200);
+  }
 });
 
 app.listen(PORT, () => {
