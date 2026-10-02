@@ -22,6 +22,7 @@ const pool = new Pool({
 
 async function inicializarBanco() {
   try {
+    // Mensagens recebidas pelo WhatsApp
     await pool.query(`
       CREATE TABLE IF NOT EXISTS mensagens (
         id SERIAL PRIMARY KEY,
@@ -34,15 +35,29 @@ async function inicializarBanco() {
       );
     `);
 
+    // Missionários cadastrados pelo administrador
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS missionarios (
+        id SERIAL PRIMARY KEY,
+        nome TEXT NOT NULL,
+        email TEXT,
+        telefone TEXT UNIQUE,
+        ativo BOOLEAN NOT NULL DEFAULT TRUE,
+        criado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     console.log("Banco de dados conectado.");
     console.log("Tabela mensagens pronta.");
+    console.log("Tabela missionarios pronta.");
+
   } catch (error) {
     console.error("Erro ao inicializar banco:", error);
   }
 }
 
 // ======================================================
-// ENVIO DE MENSAGEM PELO WHATSAPP
+// ENVIO PELO WHATSAPP
 // ======================================================
 
 async function enviarMensagemWhatsApp(telefone, texto) {
@@ -50,7 +65,7 @@ async function enviarMensagemWhatsApp(telefone, texto) {
     console.error(
       "WHATSAPP_TOKEN ou PHONE_NUMBER_ID não configurado."
     );
-    return;
+    return false;
   }
 
   try {
@@ -58,18 +73,15 @@ async function enviarMensagemWhatsApp(telefone, texto) {
       `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
       {
         method: "POST",
-
         headers: {
           Authorization: `Bearer ${WHATSAPP_TOKEN}`,
           "Content-Type": "application/json"
         },
-
         body: JSON.stringify({
           messaging_product: "whatsapp",
           recipient_type: "individual",
           to: telefone,
           type: "text",
-
           text: {
             preview_url: false,
             body: texto
@@ -85,7 +97,7 @@ async function enviarMensagemWhatsApp(telefone, texto) {
         "Erro da API do WhatsApp:",
         JSON.stringify(resultado, null, 2)
       );
-      return;
+      return false;
     }
 
     console.log("Resposta enviada pelo WhatsApp.");
@@ -94,26 +106,198 @@ async function enviarMensagemWhatsApp(telefone, texto) {
       resultado?.messages?.[0]?.id || "não informado"
     );
 
+    return true;
+
   } catch (error) {
     console.error(
       "Erro ao enviar mensagem pelo WhatsApp:",
       error
     );
+
+    return false;
   }
 }
 
 // ======================================================
-// ROTA PRINCIPAL
+// PÁGINA PRINCIPAL
 // ======================================================
 
 app.get("/", (req, res) => {
-  res
-    .status(200)
-    .send("Mensagens Missionárias - servidor online");
+  res.status(200).send(
+    "Mensagens Missionárias - servidor online"
+  );
 });
 
 // ======================================================
-// VERIFICAÇÃO DO WEBHOOK
+// API - LISTAR MISSIONÁRIOS
+// ======================================================
+
+app.get("/missionarios", async (req, res) => {
+  try {
+    const resultado = await pool.query(`
+      SELECT
+        id,
+        nome,
+        email,
+        telefone,
+        ativo,
+        criado_em
+      FROM missionarios
+      ORDER BY nome ASC
+    `);
+
+    res.json(resultado.rows);
+
+  } catch (error) {
+    console.error(
+      "Erro ao listar missionários:",
+      error
+    );
+
+    res.status(500).json({
+      erro: "Erro ao listar missionários."
+    });
+  }
+});
+
+// ======================================================
+// API - CADASTRAR MISSIONÁRIO
+// ======================================================
+
+app.post("/missionarios", async (req, res) => {
+  try {
+    const {
+      nome,
+      email,
+      telefone
+    } = req.body;
+
+    if (!nome || nome.trim() === "") {
+      return res.status(400).json({
+        erro: "O nome do missionário é obrigatório."
+      });
+    }
+
+    if (!email && !telefone) {
+      return res.status(400).json({
+        erro:
+          "Informe pelo menos o e-mail ou telefone do missionário."
+      });
+    }
+
+    const resultado = await pool.query(
+      `
+      INSERT INTO missionarios
+      (
+        nome,
+        email,
+        telefone
+      )
+      VALUES ($1, $2, $3)
+
+      RETURNING
+        id,
+        nome,
+        email,
+        telefone,
+        ativo,
+        criado_em
+      `,
+      [
+        nome.trim(),
+        email?.trim() || null,
+        telefone?.trim() || null
+      ]
+    );
+
+    console.log(
+      `Missionário cadastrado: ${nome}`
+    );
+
+    res.status(201).json(
+      resultado.rows[0]
+    );
+
+  } catch (error) {
+
+    // Telefone duplicado
+    if (error.code === "23505") {
+      return res.status(409).json({
+        erro:
+          "Já existe um missionário cadastrado com esse telefone."
+      });
+    }
+
+    console.error(
+      "Erro ao cadastrar missionário:",
+      error
+    );
+
+    res.status(500).json({
+      erro: "Erro ao cadastrar missionário."
+    });
+  }
+});
+
+// ======================================================
+// API - ATIVAR / DESATIVAR MISSIONÁRIO
+// ======================================================
+
+app.patch(
+  "/missionarios/:id/status",
+  async (req, res) => {
+
+    try {
+      const id = req.params.id;
+      const { ativo } = req.body;
+
+      if (typeof ativo !== "boolean") {
+        return res.status(400).json({
+          erro:
+            "O campo ativo deve ser true ou false."
+        });
+      }
+
+      const resultado = await pool.query(
+        `
+        UPDATE missionarios
+        SET ativo = $1
+        WHERE id = $2
+
+        RETURNING
+          id,
+          nome,
+          email,
+          telefone,
+          ativo
+        `,
+        [ativo, id]
+      );
+
+      if (resultado.rowCount === 0) {
+        return res.status(404).json({
+          erro: "Missionário não encontrado."
+        });
+      }
+
+      res.json(resultado.rows[0]);
+
+    } catch (error) {
+      console.error(
+        "Erro ao alterar missionário:",
+        error
+      );
+
+      res.status(500).json({
+        erro:
+          "Erro ao alterar status do missionário."
+      });
+    }
+  }
+);
+
+// ======================================================
+// VERIFICAÇÃO DO WEBHOOK DA META
 // ======================================================
 
 app.get("/webhook", (req, res) => {
@@ -125,7 +309,10 @@ app.get("/webhook", (req, res) => {
     mode === "subscribe" &&
     token === VERIFY_TOKEN
   ) {
-    console.log("Webhook verificado com sucesso.");
+    console.log(
+      "Webhook verificado com sucesso."
+    );
+
     return res.status(200).send(challenge);
   }
 
@@ -133,97 +320,112 @@ app.get("/webhook", (req, res) => {
 });
 
 // ======================================================
-// RECEBIMENTO DO WEBHOOK
+// RECEBIMENTO DAS MENSAGENS
 // ======================================================
 
 app.post("/webhook", async (req, res) => {
 
-  // Confirma imediatamente o recebimento para a Meta.
+  // Confirma imediatamente para a Meta.
   res.sendStatus(200);
 
   try {
     const value =
       req.body?.entry?.[0]?.changes?.[0]?.value;
 
-    const message = value?.messages?.[0];
-    const contact = value?.contacts?.[0];
+    const message =
+      value?.messages?.[0];
 
-    // Alguns webhooks são apenas atualizações de status.
+    const contact =
+      value?.contacts?.[0];
+
+    // Eventos de status não possuem message.
     if (!message) {
       return;
     }
 
-    const whatsappMessageId = message.id;
-    const telefone = message.from;
+    const whatsappMessageId =
+      message.id;
+
+    const telefone =
+      message.from;
+
     const nome =
-      contact?.profile?.name || "Sem nome";
+      contact?.profile?.name ||
+      "Sem nome";
 
     const tipo =
-      message.type || "desconhecido";
+      message.type ||
+      "desconhecido";
 
     let texto = "";
 
     if (message.type === "text") {
-      texto = message.text?.body || "";
+      texto =
+        message.text?.body || "";
     }
 
-    console.log("Nova mensagem recebida:");
+    console.log(
+      "Nova mensagem recebida:"
+    );
+
     console.log(`Nome: ${nome}`);
     console.log(`Telefone: ${telefone}`);
     console.log(`Mensagem: ${texto}`);
     console.log(`Tipo: ${tipo}`);
 
-    // ==================================================
-    // SALVAR NO POSTGRESQL
-    // ==================================================
+    const resultadoBanco =
+      await pool.query(
+        `
+        INSERT INTO mensagens
+        (
+          whatsapp_message_id,
+          nome,
+          telefone,
+          mensagem,
+          tipo
+        )
 
-    const resultadoBanco = await pool.query(
-      `
-      INSERT INTO mensagens
-      (
-        whatsapp_message_id,
-        nome,
-        telefone,
-        mensagem,
-        tipo
-      )
+        VALUES ($1, $2, $3, $4, $5)
 
-      VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT
+        (whatsapp_message_id)
+        DO NOTHING
 
-      ON CONFLICT (whatsapp_message_id)
-      DO NOTHING
+        RETURNING id
+        `,
+        [
+          whatsappMessageId,
+          nome,
+          telefone,
+          texto,
+          tipo
+        ]
+      );
 
-      RETURNING id
-      `,
-      [
-        whatsappMessageId,
-        nome,
-        telefone,
-        texto,
-        tipo
-      ]
-    );
-
-    // Se não inseriu, provavelmente é reenvio do webhook.
-    if (resultadoBanco.rowCount === 0) {
+    if (
+      resultadoBanco.rowCount === 0
+    ) {
       console.log(
         "Mensagem já processada anteriormente."
       );
+
       return;
     }
 
-    console.log("Mensagem salva no banco de dados.");
+    console.log(
+      "Mensagem salva no banco de dados."
+    );
 
-    // ==================================================
-    // RESPOSTA AUTOMÁTICA
-    // ==================================================
-
+    // Mantemos a confirmação automática
+    // apenas enquanto construímos o fluxo definitivo.
     if (message.type === "text") {
 
       const respostaAutomatica =
         `Olá, ${nome}! 👋\n\n` +
-        `Recebemos sua mensagem no Mensagens Missionárias.\n\n` +
-        `Obrigado por entrar em contato conosco. 🙏`;
+        `Sua mensagem foi recebida pelo ` +
+        `Mensagens Missionárias.\n\n` +
+        `Em breve você poderá selecionar ` +
+        `o missionário e enviar sua mensagem.`;
 
       await enviarMensagemWhatsApp(
         telefone,
