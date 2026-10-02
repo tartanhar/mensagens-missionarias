@@ -1,5 +1,6 @@
 import express from "express";
 import pg from "pg";
+import { Resend } from "resend";
 
 const { Pool } = pg;
 
@@ -14,6 +15,15 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+
+// ======================================================
+// RESEND
+// ======================================================
+
+const resend = RESEND_API_KEY
+  ? new Resend(RESEND_API_KEY)
+  : null;
 
 // ======================================================
 // POSTGRESQL
@@ -77,6 +87,12 @@ async function inicializarBanco() {
     console.log("Tabela missionarios pronta.");
     console.log("Tabela conversas pronta.");
     console.log("Tabela mensagens_missionarios pronta.");
+
+    if (RESEND_API_KEY) {
+      console.log("Resend configurado.");
+    } else {
+      console.log("AVISO: RESEND_API_KEY não configurada.");
+    }
 
   } catch (error) {
     console.error("Erro ao inicializar banco:", error);
@@ -190,6 +206,12 @@ function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
       color: white;
     }
 
+    .teste-email {
+      margin-top: 10px;
+      background: #2563eb;
+      color: white;
+    }
+
     .ativar {
       background: #157347;
       color: white;
@@ -198,6 +220,24 @@ function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
     .desativar {
       background: #b42318;
       color: white;
+    }
+
+    .sucesso {
+      padding: 14px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      background: #dcfce7;
+      color: #166534;
+      font-weight: bold;
+    }
+
+    .erro {
+      padding: 14px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      background: #fee2e2;
+      color: #991b1b;
+      font-weight: bold;
     }
 
     table {
@@ -842,10 +882,6 @@ app.get(
 
     try {
 
-      // ----------------------------------------------
-      // MISSIONÁRIOS
-      // ----------------------------------------------
-
       const resultado =
         await pool.query(`
           SELECT
@@ -858,10 +894,6 @@ app.get(
           FROM missionarios
           ORDER BY nome ASC
         `);
-
-      // ----------------------------------------------
-      // MENSAGENS RECEBIDAS
-      // ----------------------------------------------
 
       const resultadoMensagens =
         await pool.query(`
@@ -886,9 +918,12 @@ app.get(
           req.query.senha || ""
         );
 
-      // ----------------------------------------------
-      // LINHAS DOS MISSIONÁRIOS
-      // ----------------------------------------------
+      const aviso =
+        req.query.email === "ok"
+          ? `<div class="sucesso">E-mail de teste enviado com sucesso.</div>`
+          : req.query.email === "erro"
+            ? `<div class="erro">Não foi possível enviar o e-mail de teste. Consulte os Logs do Render.</div>`
+            : "";
 
       const linhas =
         resultado.rows
@@ -978,10 +1013,6 @@ app.get(
           )
           .join("");
 
-      // ----------------------------------------------
-      // LINHAS DAS MENSAGENS
-      // ----------------------------------------------
-
       const linhasMensagens =
         resultadoMensagens.rows
           .map(
@@ -1056,12 +1087,53 @@ app.get(
           )
           .join("");
 
-      // ----------------------------------------------
-      // HTML DO PAINEL
-      // ----------------------------------------------
-
       res.send(
         paginaHTML(`
+
+          ${aviso}
+
+          <div class="card">
+
+            <h2>
+              Testar envio de e-mail
+            </h2>
+
+            <p>
+              Digite um endereço de e-mail para verificar
+              se a integração com o Resend está funcionando.
+            </p>
+
+            <form
+              method="POST"
+              action="/admin/testar-email"
+            >
+
+              <input
+                type="hidden"
+                name="senha_admin"
+                value="${senha}"
+              >
+
+              <label>
+                E-mail para o teste
+              </label>
+
+              <input
+                type="email"
+                name="email_teste"
+                required
+              >
+
+              <button
+                class="teste-email"
+                type="submit"
+              >
+                Enviar e-mail de teste
+              </button>
+
+            </form>
+
+          </div>
 
           <div class="card">
 
@@ -1217,6 +1289,134 @@ app.get(
 
       res.status(500).send(
         "Erro ao carregar painel."
+      );
+    }
+  }
+);
+
+// ======================================================
+// TESTE DE E-MAIL - RESEND
+// ======================================================
+
+app.post(
+  "/admin/testar-email",
+  verificarAdmin,
+  async (req, res) => {
+
+    const senhaAdmin =
+      req.body.senha_admin;
+
+    try {
+
+      if (!resend) {
+        throw new Error(
+          "RESEND_API_KEY não configurada."
+        );
+      }
+
+      const emailTeste =
+        req.body.email_teste?.trim();
+
+      if (!emailTeste) {
+
+        return res.status(400).send(
+          "Informe um e-mail para realizar o teste."
+        );
+      }
+
+      console.log(
+        `Enviando e-mail de teste para ${emailTeste}...`
+      );
+
+      const resultado =
+        await resend.emails.send({
+          from:
+            "Mensagens Missionárias <onboarding@resend.dev>",
+
+          to: [
+            emailTeste
+          ],
+
+          subject:
+            "Teste - Mensagens Missionárias",
+
+          html: `
+            <div
+              style="
+                font-family: Arial, sans-serif;
+                max-width: 600px;
+                margin: auto;
+                line-height: 1.6;
+              "
+            >
+
+              <h2>
+                💙 Mensagens Missionárias
+              </h2>
+
+              <p>
+                Este é um e-mail de teste do
+                sistema Mensagens Missionárias.
+              </p>
+
+              <p>
+                Se você recebeu esta mensagem,
+                a integração entre
+                <strong>Render</strong> e
+                <strong>Resend</strong>
+                está funcionando.
+              </p>
+
+              <hr>
+
+              <p
+                style="
+                  color: #64748b;
+                  font-size: 13px;
+                "
+              >
+                Mensagens Missionárias
+              </p>
+
+            </div>
+          `
+        });
+
+      if (resultado.error) {
+
+        console.error(
+          "Erro retornado pelo Resend:",
+          resultado.error
+        );
+
+        throw new Error(
+          resultado.error.message ||
+          "Erro no Resend."
+        );
+      }
+
+      console.log(
+        "E-mail enviado pelo Resend:",
+        resultado.data
+      );
+
+      res.redirect(
+        `/admin?senha=${encodeURIComponent(
+          senhaAdmin
+        )}&email=ok`
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Erro ao enviar e-mail de teste:",
+        error
+      );
+
+      res.redirect(
+        `/admin?senha=${encodeURIComponent(
+          senhaAdmin
+        )}&email=erro`
       );
     }
   }
@@ -1398,7 +1598,6 @@ app.post(
   "/webhook",
   async (req, res) => {
 
-    // Confirma imediatamente para a Meta.
     res.sendStatus(200);
 
     try {
@@ -1415,7 +1614,6 @@ app.post(
       const contact =
         value?.contacts?.[0];
 
-      // Eventos de status não entram no fluxo.
       if (!message) {
         return;
       }
@@ -1457,10 +1655,6 @@ app.post(
         `Tipo: ${tipo}`
       );
 
-      // ----------------------------------------------
-      // REGISTRA A MENSAGEM RECEBIDA
-      // ----------------------------------------------
-
       const registro =
         await pool.query(
           `
@@ -1491,7 +1685,6 @@ app.post(
           ]
         );
 
-      // Evita processar novamente a mesma mensagem.
       if (
         registro.rowCount === 0
       ) {
@@ -1507,10 +1700,6 @@ app.post(
         "Mensagem salva no banco de dados."
       );
 
-      // ----------------------------------------------
-      // SOMENTE TEXTO NESTA VERSÃO
-      // ----------------------------------------------
-
       if (
         tipo !== "text"
       ) {
@@ -1522,10 +1711,6 @@ app.post(
 
         return;
       }
-
-      // ----------------------------------------------
-      // PROCESSA O FLUXO DA FAMÍLIA
-      // ----------------------------------------------
 
       await processarConversa(
         telefone,
