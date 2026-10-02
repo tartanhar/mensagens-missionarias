@@ -1,5 +1,6 @@
 import express from "express";
 import pg from "pg";
+import cron from "node-cron";
 import { Resend } from "resend";
 
 const { Pool } = pg;
@@ -20,6 +21,14 @@ const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
+
+const WEEKLY_CRON =
+  process.env.WEEKLY_CRON ||
+  "0 6 * * 1";
+
+const TIMEZONE =
+  process.env.TIMEZONE ||
+  "America/Sao_Paulo";
 
 // ======================================================
 // RESEND
@@ -95,10 +104,16 @@ async function inicializarBanco() {
     if (RESEND_API_KEY) {
       console.log("Resend configurado.");
     } else {
-      console.log("AVISO: RESEND_API_KEY não configurada.");
+      console.log(
+        "AVISO: RESEND_API_KEY não configurada."
+      );
     }
   } catch (error) {
-    console.error("Erro ao inicializar banco:", error);
+    console.error(
+      "Erro ao inicializar banco:",
+      error
+    );
+
     throw error;
   }
 }
@@ -116,7 +131,10 @@ function escaparHTML(valor = "") {
     .replaceAll("'", "&#039;");
 }
 
-function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
+function paginaHTML(
+  conteudo,
+  titulo = "Mensagens Missionárias"
+) {
   return `
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -1712,27 +1730,19 @@ app.get(
           <div class="estatisticas">
 
             <div class="estatistica">
-
-              <p>
-                Mensagens pendentes
-              </p>
+              <p>Mensagens pendentes</p>
 
               <div class="numero">
                 ${pendentes}
               </div>
-
             </div>
 
             <div class="estatistica">
-
-              <p>
-                Mensagens enviadas
-              </p>
+              <p>Mensagens enviadas</p>
 
               <div class="numero">
                 ${enviadas}
               </div>
-
             </div>
 
           </div>
@@ -1750,20 +1760,15 @@ app.get(
             </p>
 
             <p>
-              Cada missionário receberá
-              apenas um e-mail contendo
-              todas as mensagens que
-              estiverem pendentes para ele.
+              Cada missionário receberá apenas
+              um e-mail contendo todas as mensagens
+              que estiverem pendentes para ele.
             </p>
 
             <div class="info">
-
-              As mensagens somente serão
-              marcadas como
-              <strong>ENVIADA</strong>
-              depois que o Resend confirmar
-              o envio.
-
+              As mensagens somente serão marcadas
+              como <strong>ENVIADA</strong> depois
+              que o Resend confirmar o envio.
             </div>
 
             <form
@@ -1800,9 +1805,9 @@ app.get(
             </h2>
 
             <p>
-              Digite um endereço de e-mail
-              para verificar se a integração
-              com o Resend está funcionando.
+              Digite um endereço de e-mail para
+              verificar se a integração com o
+              Resend está funcionando.
             </p>
 
             <form
@@ -1903,7 +1908,6 @@ app.get(
             <table>
 
               <thead>
-
                 <tr>
                   <th>ID</th>
                   <th>Nome</th>
@@ -1912,11 +1916,9 @@ app.get(
                   <th>Status</th>
                   <th>Ação</th>
                 </tr>
-
               </thead>
 
               <tbody>
-
                 ${
                   linhas ||
                   `
@@ -1927,7 +1929,6 @@ app.get(
                     </tr>
                   `
                 }
-
               </tbody>
 
             </table>
@@ -1948,7 +1949,6 @@ app.get(
             <table>
 
               <thead>
-
                 <tr>
                   <th>ID</th>
                   <th>Missionário</th>
@@ -1957,11 +1957,9 @@ app.get(
                   <th>Recebida em</th>
                   <th>Status</th>
                 </tr>
-
               </thead>
 
               <tbody>
-
                 ${
                   linhasMensagens ||
                   `
@@ -1972,7 +1970,6 @@ app.get(
                     </tr>
                   `
                 }
-
               </tbody>
 
             </table>
@@ -2158,9 +2155,7 @@ app.post(
           `
         });
 
-      if (
-        resultado.error
-      ) {
+      if (resultado.error) {
 
         console.error(
           "Erro retornado pelo Resend:",
@@ -2218,9 +2213,7 @@ app.post(
         senha_admin
       } = req.body;
 
-      if (
-        !nome?.trim()
-      ) {
+      if (!nome?.trim()) {
 
         return res
           .status(400)
@@ -2509,9 +2502,7 @@ app.post(
         senha_admin
       } = req.body;
 
-      if (
-        !nome?.trim()
-      ) {
+      if (!nome?.trim()) {
 
         return res
           .status(400)
@@ -2708,7 +2699,6 @@ app.post(
   "/webhook",
   async (req, res) => {
 
-    // Responde imediatamente à Meta.
     res.sendStatus(200);
 
     try {
@@ -2853,6 +2843,128 @@ app.post(
 );
 
 // ======================================================
+// ENVIO AUTOMÁTICO SEMANAL
+// ======================================================
+
+function iniciarAgendamentoSemanal() {
+
+  if (
+    !cron.validate(
+      WEEKLY_CRON
+    )
+  ) {
+
+    console.error(
+      `WEEKLY_CRON inválido: ${WEEKLY_CRON}`
+    );
+
+    return;
+  }
+
+  console.log(
+    `Compilação semanal agendada: ${WEEKLY_CRON}`
+  );
+
+  console.log(
+    `Fuso horário da compilação: ${TIMEZONE}`
+  );
+
+  cron.schedule(
+    WEEKLY_CRON,
+
+    async () => {
+
+      console.log(
+        "=========================================="
+      );
+
+      console.log(
+        "Iniciando compilação semanal automática..."
+      );
+
+      console.log(
+        `Data/hora: ${new Date().toLocaleString(
+          "pt-BR",
+          {
+            timeZone:
+              TIMEZONE
+          }
+        )}`
+      );
+
+      try {
+
+        const resultado =
+          await enviarCompilacoesPendentes();
+
+        console.log(
+          "Resultado da compilação semanal automática:",
+          resultado
+        );
+
+        if (
+          resultado.mensagens === 0 &&
+          resultado.semEmail === 0 &&
+          resultado.erros === 0
+        ) {
+
+          console.log(
+            "Nenhuma mensagem pendente para a compilação desta semana."
+          );
+
+          console.log(
+            "=========================================="
+          );
+
+          return;
+        }
+
+        console.log(
+          `Compilação automática concluída: ${resultado.mensagens} mensagem(ns) enviada(s) para ${resultado.missionarios} missionário(s).`
+        );
+
+        if (
+          resultado.semEmail > 0
+        ) {
+
+          console.log(
+            `${resultado.semEmail} missionário(s) sem e-mail cadastrado.`
+          );
+        }
+
+        if (
+          resultado.erros > 0
+        ) {
+
+          console.error(
+            `${resultado.erros} envio(s) apresentou(aram) erro. As respectivas mensagens permaneceram PENDENTES.`
+          );
+        }
+
+      } catch (error) {
+
+        console.error(
+          "Erro na compilação semanal automática:",
+          error
+        );
+      }
+
+      console.log(
+        "=========================================="
+      );
+    },
+
+    {
+      timezone:
+        TIMEZONE,
+
+      noOverlap:
+        true
+    }
+  );
+}
+
+// ======================================================
 // INICIALIZAÇÃO
 // ======================================================
 
@@ -2861,6 +2973,8 @@ async function iniciarServidor() {
   try {
 
     await inicializarBanco();
+
+    iniciarAgendamentoSemanal();
 
     app.listen(
       PORT,
