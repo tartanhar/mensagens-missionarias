@@ -95,11 +95,26 @@ async function inicializarBanco() {
       );
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS historico_compilacoes (
+        id SERIAL PRIMARY KEY,
+        tipo TEXT NOT NULL,
+        status TEXT NOT NULL,
+        missionarios INTEGER NOT NULL DEFAULT 0,
+        mensagens INTEGER NOT NULL DEFAULT 0,
+        sem_email INTEGER NOT NULL DEFAULT 0,
+        erros INTEGER NOT NULL DEFAULT 0,
+        detalhe TEXT,
+        executado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     console.log("Banco de dados conectado.");
     console.log("Tabela mensagens pronta.");
     console.log("Tabela missionarios pronta.");
     console.log("Tabela conversas pronta.");
     console.log("Tabela mensagens_missionarios pronta.");
+    console.log("Tabela historico_compilacoes pronta.");
 
     if (RESEND_API_KEY) {
       console.log("Resend configurado.");
@@ -129,6 +144,54 @@ function escaparHTML(valor = "") {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+async function registrarHistoricoCompilacao(
+  tipo,
+  status,
+  resultado = {},
+  detalhe = null
+) {
+  try {
+    await pool.query(
+      `
+      INSERT INTO historico_compilacoes
+      (
+        tipo,
+        status,
+        missionarios,
+        mensagens,
+        sem_email,
+        erros,
+        detalhe
+      )
+      VALUES
+      (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7
+      )
+      `,
+      [
+        tipo,
+        status,
+        Number(resultado.missionarios || 0),
+        Number(resultado.mensagens || 0),
+        Number(resultado.semEmail || 0),
+        Number(resultado.erros || 0),
+        detalhe
+      ]
+    );
+  } catch (error) {
+    console.error(
+      "Erro ao registrar histórico da compilação:",
+      error
+    );
+  }
 }
 
 function paginaHTML(
@@ -1416,6 +1479,23 @@ app.get(
             mensagens_missionarios
         `);
 
+      const historico =
+        await pool.query(`
+          SELECT
+            id,
+            tipo,
+            status,
+            missionarios,
+            mensagens,
+            sem_email,
+            erros,
+            detalhe,
+            executado_em
+          FROM historico_compilacoes
+          ORDER BY executado_em DESC
+          LIMIT 20
+        `);
+
       const senha =
         escaparHTML(
           req.query.senha || ""
@@ -1713,6 +1793,52 @@ app.get(
           )
           .join("");
 
+      const linhasHistorico =
+        historico.rows
+          .map(
+            (item) => {
+              const data =
+                new Date(
+                  item.executado_em
+                )
+                  .toLocaleString(
+                    "pt-BR",
+                    {
+                      timeZone:
+                        TIMEZONE
+                    }
+                  );
+
+              const classeStatus =
+                item.status === "SUCESSO"
+                  ? "enviada"
+                  : item.status === "VAZIA"
+                    ? "pendente"
+                    : "inativo";
+
+              return `
+                <tr>
+                  <td>${item.id}</td>
+                  <td>${escaparHTML(item.tipo)}</td>
+                  <td>${escaparHTML(data)}</td>
+                  <td>${item.missionarios}</td>
+                  <td>${item.mensagens}</td>
+                  <td>${item.sem_email}</td>
+                  <td>${item.erros}</td>
+                  <td>
+                    <span class="${classeStatus}">
+                      ${escaparHTML(item.status)}
+                    </span>
+                  </td>
+                  <td>
+                    ${escaparHTML(item.detalhe || "-")}
+                  </td>
+                </tr>
+              `;
+            }
+          )
+          .join("");
+
       const pendentes =
         estatisticas
           .rows[0]
@@ -1938,6 +2064,56 @@ app.get(
           <div class="card">
 
             <h2>
+              Histórico de compilações
+            </h2>
+
+            <p>
+              O envio automático está programado para
+              <strong>segunda-feira às 06:00</strong>,
+              no fuso <strong>${escaparHTML(TIMEZONE)}</strong>.
+            </p>
+
+            <p>
+              A tabela abaixo mostra as 20 execuções
+              mais recentes, manuais ou automáticas.
+            </p>
+
+            <table>
+
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Tipo</th>
+                  <th>Data/hora</th>
+                  <th>Missionários</th>
+                  <th>Mensagens</th>
+                  <th>Sem e-mail</th>
+                  <th>Erros</th>
+                  <th>Status</th>
+                  <th>Detalhe</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                ${
+                  linhasHistorico ||
+                  `
+                    <tr>
+                      <td colspan="9">
+                        Nenhuma compilação registrada ainda.
+                      </td>
+                    </tr>
+                  `
+                }
+              </tbody>
+
+            </table>
+
+          </div>
+
+          <div class="card">
+
+            <h2>
               Mensagens recebidas
             </h2>
 
@@ -2021,6 +2197,24 @@ app.post(
         resultado
       );
 
+      const statusHistorico =
+        resultado.mensagens === 0 &&
+        resultado.semEmail === 0 &&
+        resultado.erros === 0
+          ? "VAZIA"
+          : resultado.erros > 0
+            ? "PARCIAL"
+            : "SUCESSO";
+
+      await registrarHistoricoCompilacao(
+        "MANUAL",
+        statusHistorico,
+        resultado,
+        statusHistorico === "VAZIA"
+          ? "Nenhuma mensagem pendente."
+          : null
+      );
+
       if (
         resultado.mensagens === 0 &&
         resultado.semEmail === 0 &&
@@ -2050,6 +2244,14 @@ app.post(
       console.error(
         "Erro na compilação manual:",
         error
+      );
+
+      await registrarHistoricoCompilacao(
+        "MANUAL",
+        "ERRO",
+        {},
+        error?.message ||
+          "Erro inesperado na compilação manual."
       );
 
       return res.redirect(
@@ -2096,905 +2298,3 @@ app.post(
       }
 
       console.log(
-        `Enviando e-mail de teste para ${emailTeste}...`
-      );
-
-      const resultado =
-        await resend.emails.send({
-
-          from:
-            "Mensagens Missionárias <onboarding@resend.dev>",
-
-          to: [
-            emailTeste
-          ],
-
-          subject:
-            "Teste - Mensagens Missionárias",
-
-          html: `
-            <div
-              style="
-                font-family: Arial, sans-serif;
-                max-width: 600px;
-                margin: auto;
-                line-height: 1.6;
-              "
-            >
-
-              <h2>
-                💙 Mensagens Missionárias
-              </h2>
-
-              <p>
-                Este é um e-mail de teste do
-                sistema Mensagens Missionárias.
-              </p>
-
-              <p>
-                Se você recebeu esta mensagem,
-                a integração entre
-                <strong>Render</strong>
-                e
-                <strong>Resend</strong>
-                está funcionando.
-              </p>
-
-              <hr>
-
-              <p
-                style="
-                  color: #64748b;
-                  font-size: 13px;
-                "
-              >
-                Mensagens Missionárias
-              </p>
-
-            </div>
-          `
-        });
-
-      if (resultado.error) {
-
-        console.error(
-          "Erro retornado pelo Resend:",
-          resultado.error
-        );
-
-        throw new Error(
-          resultado.error.message ||
-          "Erro no Resend."
-        );
-      }
-
-      console.log(
-        "E-mail enviado pelo Resend:",
-        resultado.data
-      );
-
-      res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}&email=ok`
-      );
-
-    } catch (error) {
-
-      console.error(
-        "Erro ao enviar e-mail de teste:",
-        error
-      );
-
-      res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}&email=erro`
-      );
-    }
-  }
-);
-
-// ======================================================
-// CADASTRAR MISSIONÁRIO
-// ======================================================
-
-app.post(
-  "/admin/missionarios",
-  verificarAdmin,
-  async (req, res) => {
-
-    try {
-
-      const {
-        nome,
-        email,
-        telefone,
-        senha_admin
-      } = req.body;
-
-      if (!nome?.trim()) {
-
-        return res
-          .status(400)
-          .send(
-            "Nome obrigatório."
-          );
-      }
-
-      if (
-        !email?.trim() &&
-        !telefone?.trim()
-      ) {
-
-        return res
-          .status(400)
-          .send(
-            "Informe e-mail ou telefone."
-          );
-      }
-
-      await pool.query(
-        `
-        INSERT INTO missionarios
-        (
-          nome,
-          email,
-          telefone
-        )
-
-        VALUES
-        (
-          $1,
-          $2,
-          $3
-        )
-        `,
-        [
-          nome.trim(),
-          email?.trim() || null,
-          telefone?.trim() || null
-        ]
-      );
-
-      console.log(
-        `Missionário cadastrado: ${nome}`
-      );
-
-      res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senha_admin
-        )}`
-      );
-
-    } catch (error) {
-
-      if (
-        error.code ===
-        "23505"
-      ) {
-
-        return res
-          .status(409)
-          .send(
-            "Já existe um missionário com esse telefone."
-          );
-      }
-
-      console.error(
-        "Erro ao cadastrar missionário:",
-        error
-      );
-
-      res
-        .status(500)
-        .send(
-          "Erro ao cadastrar missionário."
-        );
-    }
-  }
-);
-
-// ======================================================
-// EDITAR MISSIONÁRIO - FORMULÁRIO
-// ======================================================
-
-app.get(
-  "/admin/missionarios/:id/editar",
-  verificarAdmin,
-  async (req, res) => {
-
-    try {
-
-      const resultado =
-        await pool.query(
-          `
-          SELECT
-            id,
-            nome,
-            email,
-            telefone,
-            ativo
-          FROM missionarios
-          WHERE id = $1
-          `,
-          [
-            req.params.id
-          ]
-        );
-
-      if (
-        resultado.rowCount === 0
-      ) {
-
-        return res
-          .status(404)
-          .send(
-            paginaHTML(`
-              <div class="card">
-
-                <h2>
-                  Missionário não encontrado
-                </h2>
-
-                <p>
-                  O cadastro solicitado
-                  não existe.
-                </p>
-
-              </div>
-            `)
-          );
-      }
-
-      const missionario =
-        resultado.rows[0];
-
-      const senha =
-        escaparHTML(
-          req.query.senha || ""
-        );
-
-      res.send(
-        paginaHTML(`
-
-          <div class="card">
-
-            <h2>
-              Editar missionário
-            </h2>
-
-            <p>
-              Você está alterando o cadastro de
-              <strong>
-                ${escaparHTML(
-                  missionario.nome
-                )}
-              </strong>.
-            </p>
-
-            <div class="info">
-
-              Esta edição mantém o mesmo
-              ID do missionário.
-
-              <br><br>
-
-              Portanto, as mensagens que
-              já estão vinculadas a ele
-              continuarão normalmente no
-              sistema.
-
-            </div>
-
-            <form
-              method="POST"
-              action="/admin/missionarios/${missionario.id}/editar"
-            >
-
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
-
-              <label>
-                Nome do missionário
-              </label>
-
-              <input
-                type="text"
-                name="nome"
-                value="${escaparHTML(
-                  missionario.nome
-                )}"
-                required
-              >
-
-              <label>
-                E-mail
-              </label>
-
-              <input
-                type="email"
-                name="email"
-                value="${escaparHTML(
-                  missionario.email ||
-                  ""
-                )}"
-              >
-
-              <label>
-                WhatsApp / telefone
-              </label>
-
-              <input
-                type="text"
-                name="telefone"
-                value="${escaparHTML(
-                  missionario.telefone ||
-                  ""
-                )}"
-                placeholder="5513999999999"
-              >
-
-              <button
-                class="principal"
-                type="submit"
-              >
-                Salvar alterações
-              </button>
-
-            </form>
-
-            <p
-              style="
-                margin-top: 25px;
-              "
-            >
-
-              <a
-                href="/admin?senha=${encodeURIComponent(
-                  req.query.senha || ""
-                )}"
-              >
-                ← Voltar ao painel
-              </a>
-
-            </p>
-
-          </div>
-
-        `)
-      );
-
-    } catch (error) {
-
-      console.error(
-        "Erro ao abrir edição do missionário:",
-        error
-      );
-
-      res
-        .status(500)
-        .send(
-          "Erro ao carregar missionário."
-        );
-    }
-  }
-);
-
-// ======================================================
-// EDITAR MISSIONÁRIO - SALVAR
-// ======================================================
-
-app.post(
-  "/admin/missionarios/:id/editar",
-  verificarAdmin,
-  async (req, res) => {
-
-    try {
-
-      const {
-        nome,
-        email,
-        telefone,
-        senha_admin
-      } = req.body;
-
-      if (!nome?.trim()) {
-
-        return res
-          .status(400)
-          .send(
-            "Nome obrigatório."
-          );
-      }
-
-      if (
-        !email?.trim() &&
-        !telefone?.trim()
-      ) {
-
-        return res
-          .status(400)
-          .send(
-            "Informe e-mail ou telefone."
-          );
-      }
-
-      const resultado =
-        await pool.query(
-          `
-          UPDATE missionarios
-
-          SET
-            nome = $1,
-            email = $2,
-            telefone = $3
-
-          WHERE id = $4
-
-          RETURNING
-            id,
-            nome,
-            email,
-            telefone
-          `,
-          [
-            nome.trim(),
-            email?.trim() || null,
-            telefone?.trim() || null,
-            req.params.id
-          ]
-        );
-
-      if (
-        resultado.rowCount === 0
-      ) {
-
-        return res
-          .status(404)
-          .send(
-            "Missionário não encontrado."
-          );
-      }
-
-      console.log(
-        `Missionário ${resultado.rows[0].nome} atualizado com sucesso.`
-      );
-
-      res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senha_admin
-        )}&editado=ok`
-      );
-
-    } catch (error) {
-
-      if (
-        error.code ===
-        "23505"
-      ) {
-
-        return res
-          .status(409)
-          .send(
-            "Esse telefone já está cadastrado para outro missionário."
-          );
-      }
-
-      console.error(
-        "Erro ao atualizar missionário:",
-        error
-      );
-
-      res
-        .status(500)
-        .send(
-          "Erro ao atualizar missionário."
-        );
-    }
-  }
-);
-
-// ======================================================
-// ATIVAR / DESATIVAR MISSIONÁRIO
-// ======================================================
-
-app.post(
-  "/admin/missionarios/:id/status",
-  verificarAdmin,
-  async (req, res) => {
-
-    try {
-
-      const ativo =
-        req.body.ativo ===
-        "true";
-
-      await pool.query(
-        `
-        UPDATE missionarios
-        SET ativo = $1
-        WHERE id = $2
-        `,
-        [
-          ativo,
-          req.params.id
-        ]
-      );
-
-      res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          req.body.senha_admin
-        )}`
-      );
-
-    } catch (error) {
-
-      console.error(
-        "Erro ao alterar status:",
-        error
-      );
-
-      res
-        .status(500)
-        .send(
-          "Erro ao alterar missionário."
-        );
-    }
-  }
-);
-
-// ======================================================
-// VERIFICAÇÃO DO WEBHOOK
-// ======================================================
-
-app.get(
-  "/webhook",
-  (req, res) => {
-
-    const mode =
-      req.query[
-        "hub.mode"
-      ];
-
-    const token =
-      req.query[
-        "hub.verify_token"
-      ];
-
-    const challenge =
-      req.query[
-        "hub.challenge"
-      ];
-
-    if (
-      mode === "subscribe" &&
-      token === VERIFY_TOKEN
-    ) {
-
-      console.log(
-        "Webhook verificado com sucesso."
-      );
-
-      return res
-        .status(200)
-        .send(
-          challenge
-        );
-    }
-
-    return res
-      .sendStatus(403);
-  }
-);
-
-// ======================================================
-// WEBHOOK DO WHATSAPP
-// ======================================================
-
-app.post(
-  "/webhook",
-  async (req, res) => {
-
-    res.sendStatus(200);
-
-    try {
-
-      const value =
-        req.body
-          ?.entry?.[0]
-          ?.changes?.[0]
-          ?.value;
-
-      const message =
-        value
-          ?.messages?.[0];
-
-      const contact =
-        value
-          ?.contacts?.[0];
-
-      if (!message) {
-        return;
-      }
-
-      const whatsappMessageId =
-        message.id;
-
-      const telefone =
-        message.from;
-
-      const nome =
-        contact
-          ?.profile
-          ?.name ||
-        "Sem nome";
-
-      const tipo =
-        message.type ||
-        "desconhecido";
-
-      const texto =
-        message
-          .text
-          ?.body || "";
-
-      console.log(
-        "Nova mensagem recebida:"
-      );
-
-      console.log(
-        `Nome: ${nome}`
-      );
-
-      console.log(
-        `Telefone: ${telefone}`
-      );
-
-      console.log(
-        `Mensagem: ${texto}`
-      );
-
-      console.log(
-        `Tipo: ${tipo}`
-      );
-
-      const registro =
-        await pool.query(
-          `
-          INSERT INTO mensagens
-          (
-            whatsapp_message_id,
-            nome,
-            telefone,
-            mensagem,
-            tipo
-          )
-
-          VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5
-          )
-
-          ON CONFLICT
-          (whatsapp_message_id)
-          DO NOTHING
-
-          RETURNING id
-          `,
-          [
-            whatsappMessageId,
-            nome,
-            telefone,
-            texto,
-            tipo
-          ]
-        );
-
-      if (
-        registro.rowCount ===
-        0
-      ) {
-
-        console.log(
-          "Mensagem já processada anteriormente."
-        );
-
-        return;
-      }
-
-      console.log(
-        "Mensagem salva no banco de dados."
-      );
-
-      if (
-        tipo !== "text"
-      ) {
-
-        await enviarMensagemWhatsApp(
-          telefone,
-          "Por enquanto, envie sua mensagem em formato de texto."
-        );
-
-        return;
-      }
-
-      await processarConversa(
-        telefone,
-        texto,
-        whatsappMessageId
-      );
-
-    } catch (error) {
-
-      console.error(
-        "Erro ao processar webhook:",
-        error
-      );
-    }
-  }
-);
-
-// ======================================================
-// ENVIO AUTOMÁTICO SEMANAL
-// ======================================================
-
-function iniciarAgendamentoSemanal() {
-
-  if (
-    !cron.validate(
-      WEEKLY_CRON
-    )
-  ) {
-
-    console.error(
-      `WEEKLY_CRON inválido: ${WEEKLY_CRON}`
-    );
-
-    return;
-  }
-
-  console.log(
-    `Compilação semanal agendada: ${WEEKLY_CRON}`
-  );
-
-  console.log(
-    `Fuso horário da compilação: ${TIMEZONE}`
-  );
-
-  cron.schedule(
-    WEEKLY_CRON,
-
-    async () => {
-
-      console.log(
-        "=========================================="
-      );
-
-      console.log(
-        "Iniciando compilação semanal automática..."
-      );
-
-      console.log(
-        `Data/hora: ${new Date().toLocaleString(
-          "pt-BR",
-          {
-            timeZone:
-              TIMEZONE
-          }
-        )}`
-      );
-
-      try {
-
-        const resultado =
-          await enviarCompilacoesPendentes();
-
-        console.log(
-          "Resultado da compilação semanal automática:",
-          resultado
-        );
-
-        if (
-          resultado.mensagens === 0 &&
-          resultado.semEmail === 0 &&
-          resultado.erros === 0
-        ) {
-
-          console.log(
-            "Nenhuma mensagem pendente para a compilação desta semana."
-          );
-
-          console.log(
-            "=========================================="
-          );
-
-          return;
-        }
-
-        console.log(
-          `Compilação automática concluída: ${resultado.mensagens} mensagem(ns) enviada(s) para ${resultado.missionarios} missionário(s).`
-        );
-
-        if (
-          resultado.semEmail > 0
-        ) {
-
-          console.log(
-            `${resultado.semEmail} missionário(s) sem e-mail cadastrado.`
-          );
-        }
-
-        if (
-          resultado.erros > 0
-        ) {
-
-          console.error(
-            `${resultado.erros} envio(s) apresentou(aram) erro. As respectivas mensagens permaneceram PENDENTES.`
-          );
-        }
-
-      } catch (error) {
-
-        console.error(
-          "Erro na compilação semanal automática:",
-          error
-        );
-      }
-
-      console.log(
-        "=========================================="
-      );
-    },
-
-    {
-      timezone:
-        TIMEZONE,
-
-      noOverlap:
-        true
-    }
-  );
-}
-
-// ======================================================
-// INICIALIZAÇÃO
-// ======================================================
-
-async function iniciarServidor() {
-
-  try {
-
-    await inicializarBanco();
-
-    iniciarAgendamentoSemanal();
-
-    app.listen(
-      PORT,
-      () => {
-
-        console.log(
-          `Servidor iniciado na porta ${PORT}`
-        );
-      }
-    );
-
-  } catch (error) {
-
-    console.error(
-      "Não foi possível iniciar o servidor:",
-      error
-    );
-
-    process.exit(1);
-  }
-}
-
-iniciarServidor();
