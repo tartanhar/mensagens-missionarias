@@ -6,6 +6,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 
 // Teste para saber se o servidor está online
 app.get("/", (req, res) => {
