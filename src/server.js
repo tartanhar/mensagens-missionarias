@@ -1,7 +1,6 @@
 import express from "express";
 import pg from "pg";
 import cron from "node-cron";
-import crypto from "crypto";
 import { Resend } from "resend";
 
 const { Pool } = pg;
@@ -11,8 +10,11 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-const PORT = process.env.PORT || 3000;
+// ======================================================
+// VARIÁVEIS DE AMBIENTE
+// ======================================================
 
+const PORT = process.env.PORT || 3000;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
@@ -20,16 +22,101 @@ const DATABASE_URL = process.env.DATABASE_URL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
-const WEEKLY_CRON = process.env.WEEKLY_CRON || "0 6 * * 1";
-const TIMEZONE = process.env.TIMEZONE || "America/Sao_Paulo";
+const WEEKLY_CRON =
+  process.env.WEEKLY_CRON ||
+  "0 6 * * 1";
+
+const TIMEZONE =
+  process.env.TIMEZONE ||
+  "America/Sao_Paulo";
+
+// ======================================================
+// RESEND
+// ======================================================
 
 const resend = RESEND_API_KEY
   ? new Resend(RESEND_API_KEY)
   : null;
 
+// ======================================================
+// POSTGRESQL
+// ======================================================
+
 const pool = new Pool({
   connectionString: DATABASE_URL
 });
+
+async function inicializarBanco() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS mensagens (
+        id SERIAL PRIMARY KEY,
+        whatsapp_message_id TEXT UNIQUE NOT NULL,
+        nome TEXT,
+        telefone TEXT NOT NULL,
+        mensagem TEXT,
+        tipo TEXT,
+        recebido_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS missionarios (
+        id SERIAL PRIMARY KEY,
+        nome TEXT NOT NULL,
+        email TEXT,
+        telefone TEXT UNIQUE,
+        ativo BOOLEAN NOT NULL DEFAULT TRUE,
+        criado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS conversas (
+        telefone TEXT PRIMARY KEY,
+        etapa TEXT NOT NULL DEFAULT 'INICIO',
+        missionario_id INTEGER REFERENCES missionarios(id),
+        nome_familia TEXT,
+        atualizado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS mensagens_missionarios (
+        id SERIAL PRIMARY KEY,
+        whatsapp_message_id TEXT UNIQUE NOT NULL,
+        missionario_id INTEGER NOT NULL REFERENCES missionarios(id),
+        telefone_familia TEXT NOT NULL,
+        nome_familia TEXT NOT NULL,
+        mensagem TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'PENDENTE',
+        criado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        enviado_em TIMESTAMPTZ
+      );
+    `);
+
+    console.log("Banco de dados conectado.");
+    console.log("Tabela mensagens pronta.");
+    console.log("Tabela missionarios pronta.");
+    console.log("Tabela conversas pronta.");
+    console.log("Tabela mensagens_missionarios pronta.");
+
+    if (RESEND_API_KEY) {
+      console.log("Resend configurado.");
+    } else {
+      console.log(
+        "AVISO: RESEND_API_KEY não configurada."
+      );
+    }
+  } catch (error) {
+    console.error(
+      "Erro ao inicializar banco:",
+      error
+    );
+
+    throw error;
+  }
+}
 
 // ======================================================
 // FUNÇÕES AUXILIARES
@@ -37,11 +124,11 @@ const pool = new Pool({
 
 function escaparHTML(valor = "") {
   return String(valor)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function paginaHTML(
@@ -53,7 +140,6 @@ function paginaHTML(
 <html lang="pt-BR">
 
 <head>
-
   <meta charset="UTF-8">
 
   <meta
@@ -61,47 +147,34 @@ function paginaHTML(
     content="width=device-width, initial-scale=1.0"
   >
 
-  <title>
-    ${escaparHTML(titulo)}
-  </title>
+  <title>${escaparHTML(titulo)}</title>
 
   <style>
-
     * {
       box-sizing: border-box;
     }
 
     body {
       margin: 0;
-      padding: 0;
-      font-family: Arial, Helvetica, sans-serif;
-      background: #f3f4f6;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
       color: #1f2937;
     }
 
     header {
-      background: #111827;
+      background: #173b57;
       color: white;
-      padding: 20px;
-    }
-
-    header .topo {
-      max-width: 1200px;
-      margin: 0 auto;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 20px;
+      padding: 24px;
     }
 
     header h1 {
       margin: 0;
-      font-size: 24px;
+      font-size: 26px;
     }
 
     header p {
-      margin: 5px 0 0;
-      color: #d1d5db;
+      margin: 6px 0 0;
+      opacity: 0.85;
     }
 
     main {
@@ -112,15 +185,150 @@ function paginaHTML(
 
     .card {
       background: white;
-      border-radius: 12px;
-      padding: 25px;
-      margin-bottom: 25px;
-      box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+      padding: 24px;
+      margin-bottom: 24px;
+      border-radius: 10px;
+      box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.08);
     }
 
-    .card h2 {
+    h2,
+    h3 {
       margin-top: 0;
-      color: #111827;
+    }
+
+    label {
+      display: block;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+
+    input {
+      width: 100%;
+      padding: 11px;
+      margin-top: 6px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 15px;
+    }
+
+    button,
+    .botao {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px 16px;
+      cursor: pointer;
+      font-size: 14px;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .principal {
+      margin-top: 20px;
+      background: #173b57;
+      color: white;
+    }
+
+    .editar {
+      background: #2563eb;
+      color: white;
+      margin-right: 6px;
+    }
+
+    .teste-email {
+      margin-top: 10px;
+      background: #2563eb;
+      color: white;
+    }
+
+    .compilacao {
+      margin-top: 10px;
+      background: #7c3aed;
+      color: white;
+      font-weight: bold;
+    }
+
+    .ativar {
+      background: #157347;
+      color: white;
+    }
+
+    .desativar {
+      background: #b42318;
+      color: white;
+    }
+
+    .sucesso {
+      padding: 14px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      background: #dcfce7;
+      color: #166534;
+      font-weight: bold;
+    }
+
+    .erro {
+      padding: 14px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      background: #fee2e2;
+      color: #991b1b;
+      font-weight: bold;
+    }
+
+    .aviso {
+      padding: 14px;
+      margin-bottom: 20px;
+      border-radius: 6px;
+      background: #fef3c7;
+      color: #92400e;
+      font-weight: bold;
+    }
+
+    .info {
+      padding: 14px;
+      border-radius: 6px;
+      background: #eff6ff;
+      color: #1e40af;
+      margin-top: 15px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    th,
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #e5e7eb;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f8fafc;
+    }
+
+    .ativo {
+      color: #157347;
+      font-weight: bold;
+    }
+
+    .inativo {
+      color: #b42318;
+      font-weight: bold;
+    }
+
+    .pendente {
+      color: #b45309;
+      font-weight: bold;
+    }
+
+    .enviada {
+      color: #157347;
+      font-weight: bold;
     }
 
     .login {
@@ -128,626 +336,160 @@ function paginaHTML(
       margin: 80px auto;
     }
 
-    label {
-      display: block;
+    .mensagem-texto {
+      max-width: 400px;
+      white-space: normal;
+      line-height: 1.5;
+    }
+
+    .numero {
+      font-size: 32px;
       font-weight: bold;
-      margin: 15px 0 7px;
-    }
-
-    input,
-    textarea,
-    select {
-      width: 100%;
-      padding: 12px;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
-      font-size: 16px;
-    }
-
-    textarea {
-      min-height: 120px;
-      resize: vertical;
-    }
-
-    button,
-    .botao {
-      display: inline-block;
-      border: 0;
-      border-radius: 8px;
-      padding: 11px 16px;
-      background: #2563eb;
-      color: white;
-      font-size: 15px;
-      font-weight: bold;
-      cursor: pointer;
-      text-decoration: none;
-      margin: 4px;
-    }
-
-    button:hover,
-    .botao:hover {
-      opacity: 0.9;
-    }
-
-    .botao-verde {
-      background: #16a34a;
-    }
-
-    .botao-vermelho {
-      background: #dc2626;
-    }
-
-    .botao-cinza {
-      background: #4b5563;
-    }
-
-    .botao-amarelo {
-      background: #d97706;
-    }
-
-    .login-button {
-      width: 100%;
-      margin: 20px 0 0;
-    }
-
-    .erro {
-      background: #fee2e2;
-      color: #991b1b;
-      padding: 15px;
-      border-radius: 8px;
-      margin: 15px 0;
-    }
-
-    .sucesso {
-      background: #dcfce7;
-      color: #166534;
-      padding: 15px;
-      border-radius: 8px;
-      margin: 15px 0;
-    }
-
-    .aviso {
-      background: #fef3c7;
-      color: #92400e;
-      padding: 15px;
-      border-radius: 8px;
-      margin: 15px 0;
+      color: #173b57;
+      margin: 5px 0;
     }
 
     .estatisticas {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns:
+        repeat(auto-fit, minmax(180px, 1fr));
       gap: 15px;
-      margin-bottom: 25px;
+      margin-bottom: 24px;
     }
 
     .estatistica {
       background: white;
-      border-radius: 12px;
+      border-radius: 10px;
       padding: 20px;
-      box-shadow: 0 3px 12px rgba(0,0,0,0.08);
+      box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.08);
     }
 
-    .estatistica strong {
-      display: block;
-      font-size: 32px;
-      margin-top: 8px;
-    }
-
-    .pendente {
-      color: #d97706;
-      font-weight: bold;
-    }
-
-    .enviada {
-      color: #16a34a;
-      font-weight: bold;
-    }
-
-    .ativo {
-      color: #16a34a;
-      font-weight: bold;
-    }
-
-    .inativo {
-      color: #dc2626;
-      font-weight: bold;
-    }
-
-    .tabela-container {
-      overflow-x: auto;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      min-width: 700px;
-    }
-
-    th,
-    td {
-      text-align: left;
-      padding: 12px;
-      border-bottom: 1px solid #e5e7eb;
-      vertical-align: top;
-    }
-
-    th {
-      background: #f9fafb;
+    .estatistica p {
+      margin: 0;
+      color: #64748b;
     }
 
     .acoes {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 5px;
+      white-space: nowrap;
     }
 
     .acoes form {
+      display: inline-block;
       margin: 0;
     }
 
-    .centralizado {
-      text-align: center;
-    }
-
-    .home {
-      text-align: center;
-      max-width: 700px;
-      margin: 80px auto;
-    }
-
-    .home h1 {
-      font-size: 34px;
-    }
-
-    .home .botao {
-      margin-top: 20px;
-      font-size: 17px;
-      padding: 14px 25px;
-    }
-
-    footer {
-      text-align: center;
-      color: #6b7280;
-      padding: 30px;
-      font-size: 14px;
-    }
-
-    .cabecalho-painel {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 15px;
-      flex-wrap: wrap;
-    }
-
-    @media (max-width: 800px) {
-
-      .estatisticas {
-        grid-template-columns: repeat(2, 1fr);
+    @media (max-width: 700px) {
+      table,
+      thead,
+      tbody,
+      th,
+      td,
+      tr {
+        display: block;
       }
 
+      thead {
+        display: none;
+      }
+
+      tr {
+        margin-bottom: 18px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 10px;
+      }
+
+      td {
+        border: 0;
+        padding: 7px;
+      }
     }
-
-    @media (max-width: 500px) {
-
-      .estatisticas {
-        grid-template-columns: 1fr;
-      }
-
-      main {
-        padding: 0 10px;
-      }
-
-      .card {
-        padding: 18px;
-      }
-
-      header .topo {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-
-    }
-
   </style>
-
 </head>
 
 <body>
 
-  <header>
+<header>
+  <h1>Mensagens Missionárias</h1>
 
-    <div class="topo">
+  <p>
+    Painel administrativo
+  </p>
+</header>
 
-      <div>
-
-        <h1>
-          Mensagens Missionárias
-        </h1>
-
-        <p>
-          Painel administrativo
-        </p>
-
-      </div>
-
-    </div>
-
-  </header>
-
-  <main>
-
-    ${conteudo}
-
-  </main>
-
-  <footer>
-
-    Mensagens Missionárias
-
-  </footer>
+<main>
+  ${conteudo}
+</main>
 
 </body>
-
 </html>
 `;
 }
 
 // ======================================================
-// AUTENTICAÇÃO DO ADMIN
+// SEGURANÇA DO PAINEL
 // ======================================================
 
-function criarTokenAdmin() {
-
-  return crypto
-    .createHmac(
-      "sha256",
-      ADMIN_PASSWORD || ""
-    )
-    .update(
-      "mensagens-missionarias-admin"
-    )
-    .digest("hex");
-}
-
-function obterCookies(req) {
-
-  const cabecalho =
-    req.headers.cookie || "";
-
-  const cookies = {};
-
-  if (!cabecalho) {
-    return cookies;
-  }
-
-  cabecalho
-    .split(";")
-    .forEach((item) => {
-
-      const partes =
-        item.trim().split("=");
-
-      if (partes.length >= 2) {
-
-        const nome =
-          partes.shift();
-
-        const valor =
-          partes.join("=");
-
-        try {
-
-          cookies[nome] =
-            decodeURIComponent(valor);
-
-        } catch {
-
-          cookies[nome] = valor;
-
-        }
-
-      }
-
-    });
-
-  return cookies;
-}
-
-function usuarioEstaAutenticado(req) {
+function verificarAdmin(req, res, next) {
+  const senha =
+    req.headers["x-admin-password"] ||
+    req.query.senha ||
+    req.body?.senha_admin;
 
   if (!ADMIN_PASSWORD) {
-    return false;
+    return res
+      .status(500)
+      .send(
+        "ADMIN_PASSWORD não configurado."
+      );
   }
 
-  const cookies =
-    obterCookies(req);
+  if (senha !== ADMIN_PASSWORD) {
+    return res
+      .status(401)
+      .send(
+        paginaHTML(`
+          <div class="card login">
 
-  const token =
-    cookies.admin_session;
+            <h2>
+              Acesso administrativo
+            </h2>
 
-  if (!token) {
-    return false;
-  }
+            <p>
+              Digite a senha do painel.
+            </p>
 
-  const tokenEsperado =
-    criarTokenAdmin();
+            <form
+              method="GET"
+              action="/admin"
+            >
 
-  try {
+              <label>
+                Senha
+              </label>
 
-    const tokenBuffer =
-      Buffer.from(token);
+              <input
+                type="password"
+                name="senha"
+                required
+              >
 
-    const esperadoBuffer =
-      Buffer.from(tokenEsperado);
+              <button
+                class="principal"
+                type="submit"
+              >
+                Entrar
+              </button>
 
-    if (
-      tokenBuffer.length !==
-      esperadoBuffer.length
-    ) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(
-      tokenBuffer,
-      esperadoBuffer
-    );
-
-  } catch {
-
-    return false;
-
-  }
-}
-
-function enviarCookieLogin(res) {
-
-  const token =
-    criarTokenAdmin();
-
-  res.setHeader(
-    "Set-Cookie",
-    `admin_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Max-Age=28800; Path=/; Secure`
-  );
-}
-
-function apagarCookieLogin(res) {
-
-  res.setHeader(
-    "Set-Cookie",
-    "admin_session=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/; Secure"
-  );
-}
-
-function paginaLogin(
-  mensagem = ""
-) {
-
-  return paginaHTML(
-    `
-    <div class="card login">
-
-      <h2>
-        🔐 Acesso administrativo
-      </h2>
-
-      <p>
-        Digite a senha para acessar o painel do
-        <strong>Mensagens Missionárias</strong>.
-      </p>
-
-      ${
-        mensagem
-          ? `
-            <div class="erro">
-              ${escaparHTML(mensagem)}
-            </div>
-          `
-          : ""
-      }
-
-      <form
-        method="POST"
-        action="/admin/login"
-      >
-
-        <label for="senha">
-          Senha
-        </label>
-
-        <input
-          id="senha"
-          type="password"
-          name="senha"
-          autocomplete="current-password"
-          required
-        >
-
-        <button
-          class="login-button"
-          type="submit"
-        >
-          Entrar no painel
-        </button>
-
-      </form>
-
-    </div>
-    `,
-    "Login - Mensagens Missionárias"
-  );
-}
-
-function verificarAdmin(
-  req,
-  res,
-  next
-) {
-
-  res.setHeader(
-    "Cache-Control",
-    "no-store, no-cache, must-revalidate, proxy-revalidate"
-  );
-
-  res.setHeader(
-    "Pragma",
-    "no-cache"
-  );
-
-  if (!ADMIN_PASSWORD) {
-
-    return res.status(500).send(
-      paginaHTML(
-        `
-        <div class="card">
-
-          <h2>
-            ⚠️ Erro de configuração
-          </h2>
-
-          <div class="erro">
-
-            A variável
-            <strong>ADMIN_PASSWORD</strong>
-            não está configurada no Render.
+            </form>
 
           </div>
-
-          <p>
-            Cadastre a variável ADMIN_PASSWORD
-            nas variáveis de ambiente do serviço.
-          </p>
-
-        </div>
-        `,
-        "Erro - Mensagens Missionárias"
-      )
-    );
-  }
-
-  if (
-    !usuarioEstaAutenticado(req)
-  ) {
-
-    return res.status(401).send(
-      paginaLogin()
-    );
+        `)
+      );
   }
 
   next();
-}
-
-// ======================================================
-// BANCO DE DADOS
-// ======================================================
-
-async function inicializarBanco() {
-
-  if (!DATABASE_URL) {
-
-    throw new Error(
-      "DATABASE_URL não está configurada."
-    );
-
-  }
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS mensagens (
-      id SERIAL PRIMARY KEY,
-      telefone VARCHAR(30),
-      mensagem TEXT,
-      whatsapp_message_id VARCHAR(255),
-      recebido_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  console.log(
-    "Tabela mensagens pronta."
-  );
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS missionarios (
-      id SERIAL PRIMARY KEY,
-      nome VARCHAR(150) NOT NULL,
-      email VARCHAR(255) NOT NULL,
-      ativo BOOLEAN DEFAULT TRUE,
-      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  console.log(
-    "Tabela missionarios pronta."
-  );
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS conversas (
-      id SERIAL PRIMARY KEY,
-      telefone VARCHAR(30) UNIQUE NOT NULL,
-      etapa VARCHAR(50) NOT NULL DEFAULT 'INICIO',
-      missionario_id INTEGER REFERENCES missionarios(id),
-      nome_familia VARCHAR(150),
-      atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  console.log(
-    "Tabela conversas pronta."
-  );
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS mensagens_missionarios (
-      id SERIAL PRIMARY KEY,
-      telefone VARCHAR(30),
-      missionario_id INTEGER REFERENCES missionarios(id),
-      nome_familia VARCHAR(150),
-      mensagem TEXT NOT NULL,
-      status VARCHAR(30) DEFAULT 'PENDENTE',
-      criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      enviado_em TIMESTAMP
-    )
-  `);
-
-  console.log(
-    "Tabela mensagens_missionarios pronta."
-  );
-
-  // ====================================================
-  // CORREÇÃO DE BANCO EXISTENTE
-  // ====================================================
-  // A tabela pode ter sido criada em uma versão anterior
-  // do sistema sem a coluna telefone.
-  //
-  // CREATE TABLE IF NOT EXISTS não altera uma tabela
-  // que já existe. Por isso fazemos a correção aqui.
-  // ====================================================
-
-  await pool.query(`
-    ALTER TABLE mensagens_missionarios
-    ADD COLUMN IF NOT EXISTS telefone VARCHAR(30)
-  `);
-
-  console.log(
-    "Coluna telefone verificada em mensagens_missionarios."
-  );
-
-  console.log(
-    "Banco de dados conectado."
-  );
-
-  if (resend) {
-
-    console.log(
-      "Resend configurado."
-    );
-
-  } else {
-
-    console.log(
-      "AVISO: RESEND_API_KEY não configurada."
-    );
-
-  }
 }
 
 // ======================================================
@@ -758,17 +500,170 @@ async function enviarMensagemWhatsApp(
   telefone,
   texto
 ) {
-
   if (
     !WHATSAPP_TOKEN ||
     !PHONE_NUMBER_ID
   ) {
-
     console.error(
       "WHATSAPP_TOKEN ou PHONE_NUMBER_ID não configurado."
     );
 
     return false;
+  }
+
+  try {
+    const resposta =
+      await fetch(
+        `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
+        {
+          method: "POST",
+
+          headers: {
+            Authorization:
+              `Bearer ${WHATSAPP_TOKEN}`,
+            "Content-Type":
+              "application/json"
+          },
+
+          body: JSON.stringify({
+            messaging_product:
+              "whatsapp",
+
+            recipient_type:
+              "individual",
+
+            to: telefone,
+
+            type: "text",
+
+            text: {
+              preview_url: false,
+              body: texto
+            }
+          })
+        }
+      );
+
+    const resultado =
+      await resposta.json();
+
+    if (!resposta.ok) {
+      console.error(
+        "Erro da API do WhatsApp:",
+        JSON.stringify(
+          resultado,
+          null,
+          2
+        )
+      );
+
+      return false;
+    }
+
+    console.log(
+      `Mensagem enviada para ${telefone}.`
+    );
+
+    return true;
+  } catch (error) {
+    console.error(
+      "Erro ao enviar mensagem:",
+      error
+    );
+
+    return false;
+  }
+}
+
+// ======================================================
+// MENU INTERATIVO DO WHATSAPP
+// ======================================================
+
+async function enviarMenuMissionarios(
+  telefone
+) {
+  const resultado =
+    await pool.query(`
+      SELECT
+        id,
+        nome
+      FROM missionarios
+      WHERE ativo = TRUE
+      ORDER BY nome ASC
+    `);
+
+  if (
+    resultado.rows.length === 0
+  ) {
+    await enviarMensagemWhatsApp(
+      telefone,
+      "No momento não há missionários disponíveis para receber mensagens."
+    );
+
+    return;
+  }
+
+  /*
+   * O WhatsApp permite no máximo
+   * 10 opções em uma lista interativa.
+   */
+
+  if (
+    resultado.rows.length > 10
+  ) {
+    let texto =
+      "💙 *Mensagens Missionárias*\n\n" +
+      "Para qual missionário você deseja enviar uma mensagem?\n\n";
+
+    resultado.rows.forEach(
+      (missionario, indice) => {
+        texto +=
+          `${indice + 1} - ${missionario.nome}\n`;
+      }
+    );
+
+    texto +=
+      "\nDigite somente o número correspondente ao missionário.";
+
+    await salvarEtapa(
+      telefone,
+      "AGUARDANDO_MISSIONARIO"
+    );
+
+    await enviarMensagemWhatsApp(
+      telefone,
+      texto
+    );
+
+    return;
+  }
+
+  await salvarEtapa(
+    telefone,
+    "AGUARDANDO_MISSIONARIO"
+  );
+
+  const rows =
+    resultado.rows.map(
+      (missionario) => ({
+        id:
+          `missionario_${missionario.id}`,
+
+        title:
+          missionario.nome
+            .substring(0, 24)
+      })
+    );
+
+  if (
+    !WHATSAPP_TOKEN ||
+    !PHONE_NUMBER_ID
+  ) {
+    console.error(
+      "WHATSAPP_TOKEN ou PHONE_NUMBER_ID não configurado."
+    );
+
+    return;
   }
 
   try {
@@ -788,82 +683,159 @@ async function enviarMensagemWhatsApp(
           },
 
           body: JSON.stringify({
-
             messaging_product:
               "whatsapp",
 
             recipient_type:
               "individual",
 
-            to: telefone,
+            to:
+              telefone,
 
-            type: "text",
+            type:
+              "interactive",
 
-            text: {
-              preview_url: false,
-              body: texto
+            interactive: {
+              type:
+                "list",
+
+              header: {
+                type:
+                  "text",
+
+                text:
+                  "💙 Mensagens Missionárias"
+              },
+
+              body: {
+                text:
+                  "Para qual missionário você deseja enviar uma mensagem?"
+              },
+
+              footer: {
+                text:
+                  "Escolha um missionário na lista abaixo."
+              },
+
+              action: {
+                button:
+                  "Escolher missionário",
+
+                sections: [
+                  {
+                    title:
+                      "Missionários",
+
+                    rows:
+                      rows
+                  }
+                ]
+              }
             }
-
           })
         }
       );
 
-    const dados =
+    const resultadoJson =
       await resposta.json();
 
-    if (!resposta.ok) {
+    if (
+      !resposta.ok
+    ) {
 
       console.error(
-        "Erro WhatsApp:",
+        "Erro ao enviar menu interativo:",
         JSON.stringify(
-          dados,
+          resultadoJson,
           null,
           2
         )
       );
 
-      return false;
+      /*
+       * Se a API não aceitar o menu,
+       * usamos automaticamente o
+       * menu de texto.
+       */
+
+      let texto =
+        "💙 *Mensagens Missionárias*\n\n" +
+        "Para qual missionário você deseja enviar uma mensagem?\n\n";
+
+      resultado.rows.forEach(
+        (missionario, indice) => {
+          texto +=
+            `${indice + 1} - ${missionario.nome}\n`;
+        }
+      );
+
+      texto +=
+        "\nDigite somente o número correspondente ao missionário.";
+
+      await enviarMensagemWhatsApp(
+        telefone,
+        texto
+      );
+
+      return;
     }
 
     console.log(
-      "Mensagem enviada pelo WhatsApp com sucesso."
+      `Menu interativo enviado para ${telefone}.`
     );
-
-    return true;
 
   } catch (error) {
 
     console.error(
-      "Erro ao enviar WhatsApp:",
+      "Erro ao enviar menu interativo:",
       error
     );
 
-    return false;
+    /*
+     * Fallback para menu de texto.
+     */
+
+    let texto =
+      "💙 *Mensagens Missionárias*\n\n" +
+      "Para qual missionário você deseja enviar uma mensagem?\n\n";
+
+    resultado.rows.forEach(
+      (missionario, indice) => {
+        texto +=
+          `${indice + 1} - ${missionario.nome}\n`;
+      }
+    );
+
+    texto +=
+      "\nDigite somente o número correspondente ao missionário.";
+
+    await enviarMensagemWhatsApp(
+      telefone,
+      texto
+    );
   }
 }
 
 // ======================================================
-// CONVERSAS
+// CONTROLE DA CONVERSA
 // ======================================================
 
-async function obterConversa(
-  telefone
-) {
-
+async function buscarConversa(telefone) {
   const resultado =
     await pool.query(
       `
-      SELECT *
+      SELECT
+        telefone,
+        etapa,
+        missionario_id,
+        nome_familia
       FROM conversas
       WHERE telefone = $1
       `,
       [telefone]
     );
 
-  return (
-    resultado.rows[0] ||
-    null
-  );
+  return resultado.rows[0] || null;
 }
 
 async function salvarEtapa(
@@ -872,7 +844,6 @@ async function salvarEtapa(
   missionarioId = null,
   nomeFamilia = null
 ) {
-
   await pool.query(
     `
     INSERT INTO conversas
@@ -883,6 +854,7 @@ async function salvarEtapa(
       nome_familia,
       atualizado_em
     )
+
     VALUES
     (
       $1,
@@ -895,16 +867,11 @@ async function salvarEtapa(
     ON CONFLICT (telefone)
 
     DO UPDATE SET
-
-      etapa =
-        EXCLUDED.etapa,
-
+      etapa = EXCLUDED.etapa,
       missionario_id =
         EXCLUDED.missionario_id,
-
       nome_familia =
         EXCLUDED.nome_familia,
-
       atualizado_em =
         CURRENT_TIMESTAMP
     `,
@@ -917,185 +884,20 @@ async function salvarEtapa(
   );
 }
 
-async function enviarMenuMissionarios(
+async function reiniciarConversa(
   telefone
 ) {
-
-  const resultado =
-    await pool.query(`
-      SELECT
-        id,
-        nome
-      FROM missionarios
-      WHERE ativo = TRUE
-      ORDER BY nome ASC
-    `);
-
-  if (
-    resultado.rows.length === 0
-  ) {
-
-    await enviarMensagemWhatsApp(
-      telefone,
-      "No momento não há missionários disponíveis para receber mensagens."
-    );
-
-    return;
-  }
-
-  await salvarEtapa(
-    telefone,
-    "AGUARDANDO_MISSIONARIO"
+  await pool.query(
+    `
+    DELETE FROM conversas
+    WHERE telefone = $1
+    `,
+    [telefone]
   );
-
-  if (
-    resultado.rows.length > 10
-  ) {
-
-    let texto =
-      "Escolha o missionário digitando o número correspondente:\n\n";
-
-    resultado.rows.forEach(
-      (missionario, indice) => {
-
-        texto +=
-          `${indice + 1} - ${missionario.nome}\n`;
-
-      }
-    );
-
-    await enviarMensagemWhatsApp(
-      telefone,
-      texto
-    );
-
-    return;
-  }
-
-  const rows =
-    resultado.rows.map(
-      (missionario) => ({
-
-        id:
-          `missionario_${missionario.id}`,
-
-        title:
-          missionario.nome
-            .substring(0, 24),
-
-        description:
-          "Enviar uma mensagem"
-
-      })
-    );
-
-  const payload = {
-
-    messaging_product:
-      "whatsapp",
-
-    recipient_type:
-      "individual",
-
-    to: telefone,
-
-    type:
-      "interactive",
-
-    interactive: {
-
-      type:
-        "list",
-
-      body: {
-
-        text:
-          "Para qual missionário você deseja enviar a mensagem?"
-
-      },
-
-      action: {
-
-        button:
-          "Escolher missionário",
-
-        sections: [
-          {
-            title:
-              "Missionários",
-
-            rows
-          }
-        ]
-
-      }
-
-    }
-
-  };
-
-  try {
-
-    const resposta =
-      await fetch(
-        `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
-        {
-
-          method:
-            "POST",
-
-          headers: {
-
-            Authorization:
-              `Bearer ${WHATSAPP_TOKEN}`,
-
-            "Content-Type":
-              "application/json"
-
-          },
-
-          body:
-            JSON.stringify(payload)
-
-        }
-      );
-
-    const dados =
-      await resposta.json();
-
-    if (!resposta.ok) {
-
-      console.error(
-        "Erro ao enviar menu:",
-        JSON.stringify(
-          dados,
-          null,
-          2
-        )
-      );
-
-      await enviarMensagemWhatsApp(
-        telefone,
-        "Não consegui apresentar a lista. Digite o número do missionário."
-      );
-    }
-
-  } catch (error) {
-
-    console.error(
-      "Erro no menu:",
-      error
-    );
-
-    await enviarMensagemWhatsApp(
-      telefone,
-      "Ocorreu um erro. Digite MENU para tentar novamente."
-    );
-  }
 }
 
 // ======================================================
-// PROCESSAMENTO DA CONVERSA
+// FLUXO DA FAMÍLIA
 // ======================================================
 
 async function processarConversa(
@@ -1104,162 +906,66 @@ async function processarConversa(
   whatsappMessageId,
   missionarioSelecionadoId = null
 ) {
+  const mensagem =
+    texto.trim();
 
-  try {
-
-    console.log(
-      "===================================="
-    );
-
-    console.log(
-      "PROCESSANDO CONVERSA"
-    );
-
-    console.log(
-      "Telefone:",
+  let conversa =
+    await buscarConversa(
       telefone
     );
 
-    console.log(
-      "Texto:",
-      texto
+  const comando =
+    mensagem.toLowerCase();
+
+  if (
+    comando === "inicio" ||
+    comando === "início" ||
+    comando === "menu"
+  ) {
+    await reiniciarConversa(
+      telefone
     );
 
-    console.log(
-      "ID WhatsApp:",
-      whatsappMessageId
+    conversa = null;
+  }
+
+  if (!conversa) {
+
+    await enviarMensagemWhatsApp(
+      telefone,
+      "Olá! 👋\n\n" +
+      "Bem-vindo ao *Mensagens Missionárias*.\n\n" +
+      "Aqui você pode deixar uma mensagem para um missionário."
     );
 
-    console.log(
-      "Missionário selecionado:",
+    await enviarMenuMissionarios(
+      telefone
+    );
+
+    return;
+  }
+
+  // ==================================================
+  // ESCOLHA DO MISSIONÁRIO
+  // ==================================================
+
+  if (
+    conversa.etapa ===
+    "AGUARDANDO_MISSIONARIO"
+  ) {
+
+    let missionario;
+
+    /*
+     * Se o usuário clicou no menu,
+     * recebemos diretamente o ID.
+     */
+
+    if (
       missionarioSelecionadoId
-    );
-
-    console.log(
-      "===================================="
-    );
-
-    const textoNormalizado =
-      String(texto || "")
-        .trim()
-        .toLowerCase();
-
-    let conversa =
-      await obterConversa(
-        telefone
-      );
-
-    console.log(
-      "Conversa encontrada:",
-      conversa
-    );
-
-    // ==================================================
-    // MENU
-    // ==================================================
-
-    if (
-      textoNormalizado === "inicio" ||
-      textoNormalizado === "início" ||
-      textoNormalizado === "menu"
     ) {
 
-      await enviarMensagemWhatsApp(
-        telefone,
-        "Olá! 👋\n\nBem-vindo ao Mensagens Missionárias.\n\nVou ajudar você a enviar uma mensagem para um missionário."
-      );
-
-      await enviarMenuMissionarios(
-        telefone
-      );
-
-      return;
-    }
-
-    // ==================================================
-    // NOVA CONVERSA
-    // ==================================================
-
-    if (!conversa) {
-
-      await salvarEtapa(
-        telefone,
-        "AGUARDANDO_MISSIONARIO"
-      );
-
-      await enviarMensagemWhatsApp(
-        telefone,
-        "Olá! 👋\n\nVamos enviar uma mensagem para um missionário."
-      );
-
-      await enviarMenuMissionarios(
-        telefone
-      );
-
-      return;
-    }
-
-    // ==================================================
-    // ESCOLHA DO MISSIONÁRIO
-    // ==================================================
-
-    if (
-      conversa.etapa ===
-      "AGUARDANDO_MISSIONARIO"
-    ) {
-
-      let missionarioId =
-        missionarioSelecionadoId;
-
-      if (!missionarioId) {
-
-        const numero =
-          Number.parseInt(
-            textoNormalizado,
-            10
-          );
-
-        if (
-          Number.isInteger(numero) &&
-          numero > 0
-        ) {
-
-          const resultado =
-            await pool.query(`
-              SELECT
-                id
-              FROM missionarios
-              WHERE ativo = TRUE
-              ORDER BY nome ASC
-            `);
-
-          if (
-            numero <=
-            resultado.rows.length
-          ) {
-
-            missionarioId =
-              resultado.rows[
-                numero - 1
-              ].id;
-
-          }
-
-        }
-
-      }
-
-      if (!missionarioId) {
-
-        await enviarMensagemWhatsApp(
-          telefone,
-          "Não consegui identificar o missionário.\n\nDigite MENU para escolher novamente."
-        );
-
-        return;
-      }
-
-      const missionario =
+      const resultado =
         await pool.query(
           `
           SELECT
@@ -1269,351 +975,302 @@ async function processarConversa(
           WHERE id = $1
             AND ativo = TRUE
           `,
-          [missionarioId]
-        );
-
-      if (
-        missionario.rows.length === 0
-      ) {
-
-        await enviarMensagemWhatsApp(
-          telefone,
-          "Esse missionário não está disponível."
-        );
-
-        await enviarMenuMissionarios(
-          telefone
-        );
-
-        return;
-      }
-
-      await salvarEtapa(
-        telefone,
-        "AGUARDANDO_FAMILIA",
-        missionarioId,
-        null
-      );
-
-      console.log(
-        "Missionário selecionado:",
-        missionario.rows[0].nome
-      );
-
-      await enviarMensagemWhatsApp(
-        telefone,
-        `Você escolheu o missionário ${missionario.rows[0].nome}.\n\nAgora informe o nome da família que está enviando a mensagem.`
-      );
-
-      return;
-    }
-
-    // ==================================================
-    // NOME DA FAMÍLIA
-    // ==================================================
-
-    if (
-      conversa.etapa ===
-      "AGUARDANDO_FAMILIA"
-    ) {
-
-      const nomeFamilia =
-        String(texto || "")
-          .trim();
-
-      if (!nomeFamilia) {
-
-        await enviarMensagemWhatsApp(
-          telefone,
-          "Por favor, informe o nome da família."
-        );
-
-        return;
-      }
-
-      if (
-        !conversa.missionario_id
-      ) {
-
-        console.error(
-          "ERRO: conversa sem missionario_id"
-        );
-
-        await enviarMensagemWhatsApp(
-          telefone,
-          "Ocorreu um problema com a escolha do missionário. Digite MENU para começar novamente."
-        );
-
-        return;
-      }
-
-      await salvarEtapa(
-        telefone,
-        "AGUARDANDO_MENSAGEM",
-        conversa.missionario_id,
-        nomeFamilia
-      );
-
-      console.log(
-        "Nome da família salvo:",
-        nomeFamilia
-      );
-
-      await enviarMensagemWhatsApp(
-        telefone,
-        "Agora escreva a mensagem que deseja enviar ao missionário."
-      );
-
-      return;
-    }
-
-    // ==================================================
-    // MENSAGEM FINAL
-    // ==================================================
-
-    if (
-      conversa.etapa ===
-      "AGUARDANDO_MENSAGEM"
-    ) {
-
-      const mensagemFinal =
-        String(texto || "")
-          .trim();
-
-      console.log(
-        "Recebendo mensagem final:",
-        mensagemFinal
-      );
-
-      if (!mensagemFinal) {
-
-        await enviarMensagemWhatsApp(
-          telefone,
-          "Por favor, escreva a mensagem."
-        );
-
-        return;
-      }
-
-      if (
-        !conversa.missionario_id
-      ) {
-
-        console.error(
-          "ERRO: missionario_id não encontrado na conversa."
-        );
-
-        await enviarMensagemWhatsApp(
-          telefone,
-          "Ocorreu um problema com o missionário selecionado. Digite MENU para começar novamente."
-        );
-
-        return;
-      }
-
-      if (
-        !conversa.nome_familia
-      ) {
-
-        console.error(
-          "ERRO: nome_familia não encontrado na conversa."
-        );
-
-        await enviarMensagemWhatsApp(
-          telefone,
-          "Ocorreu um problema com o nome da família. Digite MENU para começar novamente."
-        );
-
-        return;
-      }
-
-      console.log(
-        "Gravando mensagem no banco..."
-      );
-
-      // ================================================
-      // GRAVAR MENSAGEM
-      // ================================================
-
-      const resultado =
-        await pool.query(
-          `
-          INSERT INTO mensagens_missionarios
-          (
-            telefone,
-            missionario_id,
-            nome_familia,
-            mensagem,
-            status
-          )
-          VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            'PENDENTE'
-          )
-          RETURNING id
-          `,
           [
-            telefone,
-            conversa.missionario_id,
-            conversa.nome_familia,
-            mensagemFinal
+            missionarioSelecionadoId
           ]
         );
 
-      console.log(
-        "Mensagem gravada com sucesso. ID:",
-        resultado.rows[0]?.id
-      );
+      if (
+        resultado.rowCount === 0
+      ) {
 
-      // ================================================
-      // REINICIAR CONVERSA
-      // ================================================
-
-      await salvarEtapa(
-        telefone,
-        "INICIO",
-        null,
-        null
-      );
-
-      console.log(
-        "Conversa reiniciada."
-      );
-
-      // ================================================
-      // CONFIRMAÇÃO
-      // ================================================
-
-      const enviouConfirmacao =
         await enviarMensagemWhatsApp(
           telefone,
-          "✅ Sua mensagem foi recebida com sucesso!\n\nObrigado por enviar uma mensagem ao missionário. ❤️"
+          "Não foi possível identificar esse missionário.\n\n" +
+          "Digite *menu* para tentar novamente."
         );
 
-      console.log(
-        "Confirmação enviada:",
-        enviouConfirmacao
-      );
+        return;
+      }
 
-      return;
+      missionario =
+        resultado.rows[0];
+
+    } else {
+
+      /*
+       * Mantém compatibilidade
+       * com o antigo menu numérico.
+       */
+
+      const numero =
+        Number.parseInt(
+          mensagem,
+          10
+        );
+
+      const resultado =
+        await pool.query(`
+          SELECT
+            id,
+            nome
+          FROM missionarios
+          WHERE ativo = TRUE
+          ORDER BY nome ASC
+        `);
+
+      if (
+        !Number.isInteger(numero) ||
+        numero < 1 ||
+        numero >
+          resultado.rows.length
+      ) {
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Opção inválida.\n\n" +
+          "Escolha um missionário no menu ou digite o número correspondente."
+        );
+
+        return;
+      }
+
+      missionario =
+        resultado.rows[
+          numero - 1
+        ];
     }
-
-    // ==================================================
-    // ETAPA DESCONHECIDA
-    // ==================================================
-
-    console.log(
-      "Etapa desconhecida:",
-      conversa.etapa
-    );
 
     await salvarEtapa(
       telefone,
-      "AGUARDANDO_MISSIONARIO",
-      null,
+      "AGUARDANDO_FAMILIA",
+      missionario.id,
       null
     );
 
     await enviarMensagemWhatsApp(
       telefone,
-      "Vamos começar novamente. Escolha o missionário."
+      `Você selecionou *${missionario.nome}*.\n\n` +
+      "Qual é o nome da sua família?\n\n" +
+      "Exemplo: Família Silva"
     );
 
-    await enviarMenuMissionarios(
-      telefone
-    );
+    return;
+  }
 
-  } catch (error) {
+  // ==================================================
+  // NOME DA FAMÍLIA
+  // ==================================================
 
-    console.error(
-      "===================================="
-    );
+  if (
+    conversa.etapa ===
+    "AGUARDANDO_FAMILIA"
+  ) {
 
-    console.error(
-      "ERRO AO PROCESSAR CONVERSA"
-    );
-
-    console.error(
-      "Mensagem:",
-      error?.message
-    );
-
-    console.error(
-      "Stack:",
-      error?.stack
-    );
-
-    console.error(
-      "===================================="
-    );
-
-    try {
+    if (
+      mensagem.length < 2
+    ) {
 
       await enviarMensagemWhatsApp(
         telefone,
-        "⚠️ Ocorreu um problema ao registrar sua mensagem. Por favor, tente novamente ou digite MENU para começar novamente."
+        "Digite o nome da sua família."
       );
 
-    } catch (erroWhatsApp) {
-
-      console.error(
-        "Também ocorreu erro ao enviar mensagem de erro para o WhatsApp:",
-        erroWhatsApp
-      );
-
+      return;
     }
+
+    await salvarEtapa(
+      telefone,
+      "AGUARDANDO_MENSAGEM",
+      conversa.missionario_id,
+      mensagem
+    );
+
+    const missionario =
+      await pool.query(
+        `
+        SELECT nome
+        FROM missionarios
+        WHERE id = $1
+        `,
+        [
+          conversa.missionario_id
+        ]
+      );
+
+    await enviarMensagemWhatsApp(
+      telefone,
+      `${mensagem}, agora escreva sua mensagem para *${missionario.rows[0]?.nome}*.\n\n` +
+      "Pode escrever normalmente em uma única mensagem."
+    );
+
+    return;
   }
+
+  // ==================================================
+  // MENSAGEM PARA O MISSIONÁRIO
+  // ==================================================
+
+  if (
+    conversa.etapa ===
+    "AGUARDANDO_MENSAGEM"
+  ) {
+
+    if (!mensagem) {
+
+      await enviarMensagemWhatsApp(
+        telefone,
+        "A mensagem não pode ficar vazia."
+      );
+
+      return;
+    }
+
+    const missionario =
+      await pool.query(
+        `
+        SELECT
+          id,
+          nome
+        FROM missionarios
+        WHERE id = $1
+          AND ativo = TRUE
+        `,
+        [
+          conversa.missionario_id
+        ]
+      );
+
+    if (
+      missionario.rowCount === 0
+    ) {
+
+      await reiniciarConversa(
+        telefone
+      );
+
+      await enviarMensagemWhatsApp(
+        telefone,
+        "Esse missionário não está mais disponível.\n\n" +
+        "Envie *menu* para começar novamente."
+      );
+
+      return;
+    }
+
+    await pool.query(
+      `
+      INSERT INTO
+        mensagens_missionarios
+      (
+        whatsapp_message_id,
+        missionario_id,
+        telefone_familia,
+        nome_familia,
+        mensagem,
+        status
+      )
+
+      VALUES
+      (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        'PENDENTE'
+      )
+
+      ON CONFLICT
+      (whatsapp_message_id)
+      DO NOTHING
+      `,
+      [
+        whatsappMessageId,
+        conversa.missionario_id,
+        telefone,
+        conversa.nome_familia,
+        mensagem
+      ]
+    );
+
+    await reiniciarConversa(
+      telefone
+    );
+
+    await enviarMensagemWhatsApp(
+      telefone,
+      "✅ *Mensagem recebida!*\n\n" +
+      `Missionário: *${missionario.rows[0].nome}*\n` +
+      `Família: *${conversa.nome_familia}*\n\n` +
+      "Sua mensagem foi guardada e será incluída na próxima compilação semanal.\n\n" +
+      "Obrigado por participar do *Mensagens Missionárias*. 💙\n\n" +
+      "Se quiser enviar outra mensagem, digite *menu*."
+    );
+
+    console.log(
+      `Mensagem destinada ao missionário ${missionario.rows[0].nome} salva com sucesso.`
+    );
+
+    return;
+  }
+
+  // ==================================================
+  // REINÍCIO
+  // ==================================================
+
+  await reiniciarConversa(
+    telefone
+  );
+
+  await enviarMensagemWhatsApp(
+    telefone,
+    "Vamos começar novamente.\n\n" +
+    "Digite *menu*."
+  );
 }
 
 // ======================================================
-// COMPILAÇÃO E E-MAIL
+// COMPILAÇÃO DAS MENSAGENS
 // ======================================================
 
 async function enviarCompilacoesPendentes() {
-
   if (!resend) {
-
     throw new Error(
       "RESEND_API_KEY não configurada."
     );
-
   }
 
   const resultado =
     await pool.query(`
       SELECT
         mm.id,
-        mm.telefone,
+        mm.missionario_id,
         mm.nome_familia,
         mm.mensagem,
         mm.criado_em,
-        m.id AS missionario_id,
-        m.nome AS missionario_nome,
-        m.email AS missionario_email
+        m.nome
+          AS missionario_nome,
+        m.email
+          AS missionario_email
 
       FROM mensagens_missionarios mm
 
       INNER JOIN missionarios m
-        ON m.id = mm.missionario_id
+        ON m.id =
+          mm.missionario_id
 
-      WHERE mm.status = 'PENDENTE'
+      WHERE
+        mm.status = 'PENDENTE'
 
       ORDER BY
-        m.nome ASC,
+        m.id ASC,
         mm.criado_em ASC
     `);
 
-  const mensagens =
-    resultado.rows;
-
   if (
-    mensagens.length === 0
+    resultado.rows.length === 0
   ) {
-
     return {
       missionarios: 0,
       mensagens: 0,
@@ -1626,201 +1283,287 @@ async function enviarCompilacoesPendentes() {
     new Map();
 
   for (
-    const mensagem
-    of mensagens
+    const item of
+    resultado.rows
   ) {
-
     if (
       !grupos.has(
-        mensagem.missionario_id
+        item.missionario_id
       )
     ) {
-
       grupos.set(
-        mensagem.missionario_id,
+        item.missionario_id,
         {
-          missionario_id:
-            mensagem.missionario_id,
+          id:
+            item.missionario_id,
 
           nome:
-            mensagem.missionario_nome,
+            item.missionario_nome,
 
           email:
-            mensagem.missionario_email,
+            item.missionario_email,
 
           mensagens: []
         }
       );
-
     }
 
     grupos
       .get(
-        mensagem.missionario_id
+        item.missionario_id
       )
       .mensagens
-      .push(mensagem);
+      .push(item);
   }
 
   let totalMissionarios = 0;
   let totalMensagens = 0;
-  let semEmail = 0;
-  let erros = 0;
+  let totalSemEmail = 0;
+  let totalErros = 0;
 
   for (
-    const grupo
-    of grupos.values()
+    const missionario of
+    grupos.values()
   ) {
 
-    if (!grupo.email) {
+    if (
+      !missionario.email?.trim()
+    ) {
 
-      semEmail++;
+      console.log(
+        `Missionário ${missionario.nome} não possui e-mail cadastrado.`
+      );
+
+      totalSemEmail++;
 
       continue;
     }
 
-    const listaHTML =
-      grupo.mensagens
+    const quantidade =
+      missionario
+        .mensagens
+        .length;
+
+    const blocosMensagens =
+      missionario
+        .mensagens
         .map(
-          (item) => `
-            <div
-              style="
-                margin-bottom:20px;
-                padding:15px;
-                border:1px solid #ddd;
-                border-radius:8px;
-              "
-            >
+          (item) => {
 
-              <p>
-                <strong>
-                  Família:
-                </strong>
+            const familia =
+              escaparHTML(
+                item.nome_familia
+              );
 
-                ${escaparHTML(
-                  item.nome_familia
-                )}
-              </p>
+            const mensagem =
+              escaparHTML(
+                item.mensagem
+              )
+                .replaceAll(
+                  "\n",
+                  "<br>"
+                );
 
-              <p>
-                ${escaparHTML(
-                  item.mensagem
-                )}
-              </p>
-
-              <p
-                style="
-                  color:#666;
-                  font-size:12px;
-                "
-              >
-
-                Recebida em:
-
-                ${new Date(
-                  item.criado_em
-                ).toLocaleString(
+            const data =
+              new Date(
+                item.criado_em
+              )
+                .toLocaleString(
                   "pt-BR",
                   {
                     timeZone:
-                      TIMEZONE
+                      "America/Sao_Paulo"
                   }
-                )}
+                );
 
-              </p>
+            return `
+              <div
+                style="
+                  margin: 22px 0;
+                  padding: 18px;
+                  background: #f8fafc;
+                  border-left: 4px solid #173b57;
+                  border-radius: 6px;
+                "
+              >
 
-            </div>
-          `
+                <p
+                  style="
+                    margin: 0 0 8px;
+                    font-size: 17px;
+                    font-weight: bold;
+                    color: #173b57;
+                  "
+                >
+                  ${familia}
+                </p>
+
+                <p
+                  style="
+                    margin: 0 0 12px;
+                    line-height: 1.7;
+                    font-size: 16px;
+                  "
+                >
+                  ${mensagem}
+                </p>
+
+                <p
+                  style="
+                    margin: 0;
+                    color: #64748b;
+                    font-size: 12px;
+                  "
+                >
+                  Recebida em
+                  ${escaparHTML(data)}
+                </p>
+
+              </div>
+            `;
+          }
         )
         .join("");
 
     try {
 
-      const resposta =
-        await resend.emails.send({
+      console.log(
+        `Enviando compilação para ${missionario.nome} (${missionario.email})...`
+      );
 
+      const resultadoEmail =
+        await resend.emails.send({
           from:
             "Mensagens Missionárias <mensagens@mail.familycode.com.br>",
 
           to: [
-            grupo.email
+            missionario
+              .email
+              .trim()
           ],
 
           subject:
-            `Mensagens Missionárias - ${grupo.nome}`,
+            quantidade === 1
+              ? "Você recebeu uma nova mensagem - Mensagens Missionárias"
+              : `Você recebeu ${quantidade} novas mensagens - Mensagens Missionárias`,
 
           html: `
-
             <div
               style="
-                font-family:Arial,sans-serif;
-                max-width:700px;
-                margin:auto;
+                font-family: Arial, sans-serif;
+                max-width: 650px;
+                margin: 0 auto;
+                color: #1f2937;
               "
             >
 
-              <h1>
-                Mensagens Missionárias
-              </h1>
-
-              <p>
-                Olá,
-                ${escaparHTML(
-                  grupo.nome
-                )}!
-              </p>
-
-              <p>
-                Você recebeu as seguintes mensagens:
-              </p>
-
-              ${listaHTML}
-
-              <p>
-                Que estas mensagens possam levar
-                carinho, fé e apoio.
-              </p>
-
-              <hr>
-
-              <p
+              <div
                 style="
-                  color:#777;
-                  font-size:12px;
+                  background: #173b57;
+                  color: white;
+                  padding: 24px;
+                  border-radius: 8px 8px 0 0;
                 "
               >
-                Mensagens Missionárias
-              </p>
+
+                <h2
+                  style="
+                    margin: 0;
+                  "
+                >
+                  💙 Mensagens Missionárias
+                </h2>
+
+              </div>
+
+              <div
+                style="
+                  padding: 25px;
+                  border: 1px solid #e5e7eb;
+                  border-top: 0;
+                  border-radius: 0 0 8px 8px;
+                "
+              >
+
+                <p>
+                  Olá,
+                  <strong>
+                    ${escaparHTML(
+                      missionario.nome
+                    )}
+                  </strong>!
+                </p>
+
+                <p>
+                  ${
+                    quantidade === 1
+                      ? "Você recebeu uma nova mensagem de sua família."
+                      : `Você recebeu <strong>${quantidade}</strong> novas mensagens de suas famílias.`
+                  }
+                </p>
+
+                ${blocosMensagens}
+
+                <p
+                  style="
+                    margin-top: 30px;
+                  "
+                >
+                  Esperamos que essas
+                  mensagens tragam
+                  alegria e força para
+                  sua missão.
+                </p>
+
+                <p>
+                  Com carinho,<br>
+
+                  <strong>
+                    Mensagens Missionárias
+                  </strong>
+                </p>
+
+              </div>
 
             </div>
-
           `
         });
 
-      if (resposta.error) {
+      if (
+        resultadoEmail.error
+      ) {
 
         console.error(
-          "Erro Resend:",
-          resposta.error
+          `Erro retornado pelo Resend para ${missionario.nome}:`,
+          resultadoEmail.error
         );
 
-        erros++;
+        totalErros++;
 
         continue;
       }
 
       const ids =
-        grupo.mensagens.map(
-          (item) => item.id
-        );
+        missionario
+          .mensagens
+          .map(
+            (item) =>
+              item.id
+          );
 
       await pool.query(
         `
-        UPDATE mensagens_missionarios
+        UPDATE
+          mensagens_missionarios
+
         SET
           status = 'ENVIADA',
-          enviado_em = CURRENT_TIMESTAMP
-        WHERE id = ANY($1::int[])
+          enviado_em =
+            CURRENT_TIMESTAMP
+
+        WHERE
+          id = ANY($1::int[])
+          AND status = 'PENDENTE'
         `,
         [ids]
       );
@@ -1828,16 +1571,24 @@ async function enviarCompilacoesPendentes() {
       totalMissionarios++;
 
       totalMensagens +=
-        grupo.mensagens.length;
+        quantidade;
+
+      console.log(
+        `Compilação enviada para ${missionario.nome}.`
+      );
+
+      console.log(
+        `${quantidade} mensagem(ns) marcada(s) como ENVIADA.`
+      );
 
     } catch (error) {
 
       console.error(
-        "Erro ao enviar compilação:",
+        `Erro ao enviar compilação para ${missionario.nome}:`,
         error
       );
 
-      erros++;
+      totalErros++;
     }
   }
 
@@ -1848,149 +1599,26 @@ async function enviarCompilacoesPendentes() {
     mensagens:
       totalMensagens,
 
-    semEmail,
+    semEmail:
+      totalSemEmail,
 
-    erros
+    erros:
+      totalErros
   };
 }
 
 // ======================================================
-// PÁGINA INICIAL
+// PÁGINA PRINCIPAL
 // ======================================================
 
 app.get(
   "/",
   (req, res) => {
-
-    res.setHeader(
-      "Cache-Control",
-      "no-store"
-    );
-
-    res.send(
-      paginaHTML(
-        `
-        <div class="card home">
-
-          <h1>
-            Mensagens Missionárias
-          </h1>
-
-          <p>
-            Servidor online e funcionando corretamente.
-          </p>
-
-          <p>
-            O sistema está preparado para receber
-            mensagens pelo WhatsApp.
-          </p>
-
-          <a
-            class="botao"
-            href="/admin"
-          >
-            🔐 Entrar no painel administrativo
-          </a>
-
-        </div>
-        `,
-        "Mensagens Missionárias"
-      )
-    );
-  }
-);
-
-// ======================================================
-// LOGIN
-// ======================================================
-
-app.get(
-  "/admin/login",
-  (req, res) => {
-
-    res.setHeader(
-      "Cache-Control",
-      "no-store"
-    );
-
-    if (
-      usuarioEstaAutenticado(req)
-    ) {
-
-      return res.redirect(
-        "/admin"
+    res
+      .status(200)
+      .send(
+        "Mensagens Missionárias - servidor online"
       );
-    }
-
-    res.status(200).send(
-      paginaLogin()
-    );
-  }
-);
-
-app.post(
-  "/admin/login",
-  (req, res) => {
-
-    const senha =
-      String(
-        req.body?.senha || ""
-      );
-
-    if (
-      !ADMIN_PASSWORD
-    ) {
-
-      return res.status(500).send(
-        paginaHTML(
-          `
-          <div class="card">
-
-            <h2>
-              Erro de configuração
-            </h2>
-
-            <div class="erro">
-              ADMIN_PASSWORD não está configurada.
-            </div>
-
-          </div>
-          `
-        )
-      );
-    }
-
-    if (
-      senha !==
-      ADMIN_PASSWORD
-    ) {
-
-      return res.status(401).send(
-        paginaLogin(
-          "Senha incorreta."
-        )
-      );
-    }
-
-    enviarCookieLogin(res);
-
-    res.redirect(
-      303,
-      "/admin"
-    );
-  }
-);
-
-app.post(
-  "/admin/logout",
-  (req, res) => {
-
-    apagarCookieLogin(res);
-
-    res.redirect(
-      303,
-      "/admin/login"
-    );
   }
 );
 
@@ -2005,634 +1633,653 @@ app.get(
 
     try {
 
-      console.log(
-        "Acessando painel administrativo..."
-      );
-
-      const inicio =
-        Date.now();
-
-      const [
-        missionariosResult,
-        mensagensResult,
-        pendentesResult,
-        enviadasResult
-      ] = await Promise.all([
-
-        pool.query(`
+      const resultado =
+        await pool.query(`
           SELECT
             id,
             nome,
             email,
+            telefone,
             ativo,
             criado_em
           FROM missionarios
           ORDER BY nome ASC
-        `),
+        `);
 
-        pool.query(`
+      const resultadoMensagens =
+        await pool.query(`
           SELECT
             mm.id,
             mm.nome_familia,
+            mm.telefone_familia,
             mm.mensagem,
             mm.status,
             mm.criado_em,
             mm.enviado_em,
-            m.nome AS missionario_nome
+            m.nome
+              AS missionario_nome
 
           FROM mensagens_missionarios mm
 
-          LEFT JOIN missionarios m
-            ON m.id = mm.missionario_id
+          INNER JOIN missionarios m
+            ON m.id =
+              mm.missionario_id
 
           ORDER BY
             mm.criado_em DESC
+        `);
 
-          LIMIT 200
-        `),
-
-        pool.query(`
+      const estatisticas =
+        await pool.query(`
           SELECT
-            COUNT(*) AS total
-          FROM mensagens_missionarios
-          WHERE status = 'PENDENTE'
-        `),
 
-        pool.query(`
-          SELECT
-            COUNT(*) AS total
-          FROM mensagens_missionarios
-          WHERE status = 'ENVIADA'
-        `)
+            COUNT(*)
+              FILTER (
+                WHERE status =
+                  'PENDENTE'
+              )
+              AS pendentes,
 
-      ]);
+            COUNT(*)
+              FILTER (
+                WHERE status =
+                  'ENVIADA'
+              )
+              AS enviadas
 
-      const missionarios =
-        missionariosResult.rows;
+          FROM
+            mensagens_missionarios
+        `);
 
-      const mensagens =
-        mensagensResult.rows;
+      const senha =
+        escaparHTML(
+          req.query.senha || ""
+        );
+
+      let aviso = "";
+
+      if (
+        req.query.email === "ok"
+      ) {
+
+        aviso = `
+          <div class="sucesso">
+            E-mail de teste enviado com sucesso.
+          </div>
+        `;
+      }
+
+      if (
+        req.query.email ===
+        "erro"
+      ) {
+
+        aviso = `
+          <div class="erro">
+            Não foi possível enviar o e-mail de teste.
+            Consulte os Logs do Render.
+          </div>
+        `;
+      }
+
+      if (
+        req.query.editado === "ok"
+      ) {
+
+        aviso = `
+          <div class="sucesso">
+            Missionário atualizado com sucesso.
+          </div>
+        `;
+      }
+
+      if (
+        req.query.compilacao ===
+        "ok"
+      ) {
+
+        const totalMensagens =
+          Number(
+            req.query.mensagens ||
+            0
+          );
+
+        const totalMissionarios =
+          Number(
+            req.query.missionarios ||
+            0
+          );
+
+        const semEmail =
+          Number(
+            req.query.semEmail ||
+            0
+          );
+
+        const erros =
+          Number(
+            req.query.erros ||
+            0
+          );
+
+        aviso = `
+          <div class="sucesso">
+
+            Compilação concluída!
+
+            <br><br>
+
+            ${totalMensagens}
+            mensagem(ns) enviada(s)
+            para
+            ${totalMissionarios}
+            missionário(s).
+
+            ${
+              semEmail > 0
+                ? `<br><br>${semEmail} missionário(s) não possui(em) e-mail cadastrado.`
+                : ""
+            }
+
+            ${
+              erros > 0
+                ? `<br><br>${erros} envio(s) apresentou(aram) erro. As mensagens permaneceram PENDENTES.`
+                : ""
+            }
+
+          </div>
+        `;
+      }
+
+      if (
+        req.query.compilacao ===
+        "vazia"
+      ) {
+
+        aviso = `
+          <div class="aviso">
+            Não existem mensagens PENDENTES
+            para enviar.
+          </div>
+        `;
+      }
+
+      if (
+        req.query.compilacao ===
+        "erro"
+      ) {
+
+        aviso = `
+          <div class="erro">
+            Ocorreu um erro ao processar
+            a compilação.
+            Consulte os Logs do Render.
+          </div>
+        `;
+      }
+
+      const linhas =
+        resultado.rows
+          .map(
+            (missionario) => {
+
+              const status =
+                missionario.ativo
+                  ? `<span class="ativo">Ativo</span>`
+                  : `<span class="inativo">Inativo</span>`;
+
+              const novoStatus =
+                !missionario.ativo;
+
+              const classe =
+                missionario.ativo
+                  ? "desativar"
+                  : "ativar";
+
+              const texto =
+                missionario.ativo
+                  ? "Desativar"
+                  : "Ativar";
+
+              return `
+                <tr>
+
+                  <td>
+                    ${missionario.id}
+                  </td>
+
+                  <td>
+                    ${escaparHTML(
+                      missionario.nome
+                    )}
+                  </td>
+
+                  <td>
+                    ${escaparHTML(
+                      missionario.email ||
+                      "-"
+                    )}
+                  </td>
+
+                  <td>
+                    ${escaparHTML(
+                      missionario.telefone ||
+                      "-"
+                    )}
+                  </td>
+
+                  <td>
+                    ${status}
+                  </td>
+
+                  <td class="acoes">
+
+                    <a
+                      class="botao editar"
+                      href="/admin/missionarios/${missionario.id}/editar?senha=${encodeURIComponent(
+                        req.query.senha || ""
+                      )}"
+                    >
+                      Editar
+                    </a>
+
+                    <form
+                      method="POST"
+                      action="/admin/missionarios/${missionario.id}/status"
+                    >
+
+                      <input
+                        type="hidden"
+                        name="senha_admin"
+                        value="${senha}"
+                      >
+
+                      <input
+                        type="hidden"
+                        name="ativo"
+                        value="${novoStatus}"
+                      >
+
+                      <button
+                        class="${classe}"
+                        type="submit"
+                      >
+                        ${texto}
+                      </button>
+
+                    </form>
+
+                  </td>
+
+                </tr>
+              `;
+            }
+          )
+          .join("");
+
+      const linhasMensagens =
+        resultadoMensagens.rows
+          .map(
+            (item) => {
+
+              const data =
+                new Date(
+                  item.criado_em
+                )
+                  .toLocaleString(
+                    "pt-BR",
+                    {
+                      timeZone:
+                        "America/Sao_Paulo"
+                    }
+                  );
+
+              let classeStatus =
+                "pendente";
+
+              if (
+                item.status ===
+                "ENVIADA"
+              ) {
+
+                classeStatus =
+                  "enviada";
+              }
+
+              return `
+                <tr>
+
+                  <td>
+                    ${item.id}
+                  </td>
+
+                  <td>
+                    ${escaparHTML(
+                      item.missionario_nome
+                    )}
+                  </td>
+
+                  <td>
+                    ${escaparHTML(
+                      item.nome_familia
+                    )}
+                  </td>
+
+                  <td
+                    class="mensagem-texto"
+                  >
+                    ${escaparHTML(
+                      item.mensagem
+                    )}
+                  </td>
+
+                  <td>
+                    ${escaparHTML(
+                      data
+                    )}
+                  </td>
+
+                  <td>
+                    <span
+                      class="${classeStatus}"
+                    >
+                      ${escaparHTML(
+                        item.status
+                      )}
+                    </span>
+                  </td>
+
+                </tr>
+              `;
+            }
+          )
+          .join("");
 
       const pendentes =
-        Number(
-          pendentesResult.rows[0]?.total ||
-          0
-        );
+        estatisticas
+          .rows[0]
+          ?.pendentes || 0;
 
       const enviadas =
-        Number(
-          enviadasResult.rows[0]?.total ||
-          0
-        );
+        estatisticas
+          .rows[0]
+          ?.enviadas || 0;
 
-      console.log(
-        `Painel carregado em ${Date.now() - inicio}ms.`
-      );
+      res.send(
+        paginaHTML(`
 
-      let html = `
+          ${aviso}
 
-        <div class="cabecalho-painel">
+          <div class="estatisticas">
 
-          <div>
+            <div class="estatistica">
+              <p>Mensagens pendentes</p>
+
+              <div class="numero">
+                ${pendentes}
+              </div>
+            </div>
+
+            <div class="estatistica">
+              <p>Mensagens enviadas</p>
+
+              <div class="numero">
+                ${enviadas}
+              </div>
+            </div>
+
+          </div>
+
+          <div class="card">
 
             <h2>
-              📊 Painel administrativo
+              📬 Enviar compilação
             </h2>
 
             <p>
-              Gerenciamento das Mensagens Missionárias.
+              Envia todas as mensagens
+              <strong>PENDENTES</strong>
+              agrupadas por missionário.
             </p>
 
-          </div>
+            <p>
+              Cada missionário receberá apenas
+              um e-mail contendo todas as mensagens
+              que estiverem pendentes para ele.
+            </p>
 
-          <form
-            method="POST"
-            action="/admin/logout"
-          >
+            <div class="info">
+              As mensagens somente serão marcadas
+              como <strong>ENVIADA</strong> depois
+              que o Resend confirmar o envio.
+            </div>
 
-            <button
-              class="botao-vermelho"
-              type="submit"
+            <form
+              method="POST"
+              action="/admin/enviar-compilacao"
+              onsubmit="
+                return confirm(
+                  'Deseja enviar agora todas as mensagens pendentes?'
+                );
+              "
             >
-              Sair
-            </button>
 
-          </form>
+              <input
+                type="hidden"
+                name="senha_admin"
+                value="${senha}"
+              >
 
-        </div>
+              <button
+                class="compilacao"
+                type="submit"
+              >
+                Enviar compilação agora
+              </button>
 
-        <div class="estatisticas">
-
-          <div class="estatistica">
-
-            <span>
-              Missionários
-            </span>
-
-            <strong>
-              ${missionarios.length}
-            </strong>
-
-          </div>
-
-          <div class="estatistica">
-
-            <span>
-              Mensagens pendentes
-            </span>
-
-            <strong class="pendente">
-              ${pendentes}
-            </strong>
+            </form>
 
           </div>
 
-          <div class="estatistica">
+          <div class="card">
 
-            <span>
-              Mensagens enviadas
-            </span>
+            <h2>
+              Testar envio de e-mail
+            </h2>
 
-            <strong class="enviada">
-              ${enviadas}
-            </strong>
+            <p>
+              Digite um endereço de e-mail para
+              verificar se a integração com o
+              Resend está funcionando.
+            </p>
+
+            <form
+              method="POST"
+              action="/admin/testar-email"
+            >
+
+              <input
+                type="hidden"
+                name="senha_admin"
+                value="${senha}"
+              >
+
+              <label>
+                E-mail para o teste
+              </label>
+
+              <input
+                type="email"
+                name="email_teste"
+                required
+              >
+
+              <button
+                class="teste-email"
+                type="submit"
+              >
+                Enviar e-mail de teste
+              </button>
+
+            </form>
 
           </div>
 
-          <div class="estatistica">
+          <div class="card">
 
-            <span>
-              Total de mensagens
-            </span>
+            <h2>
+              Cadastrar missionário
+            </h2>
 
-            <strong>
-              ${mensagens.length}
-            </strong>
+            <form
+              method="POST"
+              action="/admin/missionarios"
+            >
+
+              <input
+                type="hidden"
+                name="senha_admin"
+                value="${senha}"
+              >
+
+              <label>
+                Nome do missionário
+              </label>
+
+              <input
+                type="text"
+                name="nome"
+                required
+              >
+
+              <label>
+                E-mail
+              </label>
+
+              <input
+                type="email"
+                name="email"
+              >
+
+              <label>
+                WhatsApp / telefone
+              </label>
+
+              <input
+                type="text"
+                name="telefone"
+                placeholder="5513999999999"
+              >
+
+              <button
+                class="principal"
+                type="submit"
+              >
+                Cadastrar missionário
+              </button>
+
+            </form>
 
           </div>
 
-        </div>
+          <div class="card">
 
-        <div class="card">
-
-          <h2>
-            📬 Compilação
-          </h2>
-
-          <p>
-            Envie agora as mensagens pendentes
-            para os respectivos missionários.
-          </p>
-
-          <form
-            method="POST"
-            action="/admin/enviar-compilacao"
-          >
-
-            <button
-              class="botao-verde"
-              type="submit"
-            >
-              📤 Enviar compilação
-            </button>
-
-          </form>
-
-          <form
-            method="POST"
-            action="/admin/testar-email"
-          >
-
-            <button
-              class="botao-amarelo"
-              type="submit"
-            >
-              ✉️ Testar envio de e-mail
-            </button>
-
-          </form>
-
-        </div>
-
-        <div class="card">
-
-          <h2>
-            ➕ Cadastrar missionário
-          </h2>
-
-          <form
-            method="POST"
-            action="/admin/missionarios"
-          >
-
-            <label for="nome">
-              Nome
-            </label>
-
-            <input
-              id="nome"
-              name="nome"
-              required
-            >
-
-            <label for="email">
-              E-mail
-            </label>
-
-            <input
-              id="email"
-              name="email"
-              type="email"
-              required
-            >
-
-            <button
-              type="submit"
-              class="botao-verde"
-            >
-              Cadastrar
-            </button>
-
-          </form>
-
-        </div>
-
-        <div class="card">
-
-          <h2>
-            👤 Missionários cadastrados
-          </h2>
-
-          <div class="tabela-container">
+            <h2>
+              Missionários cadastrados
+            </h2>
 
             <table>
 
               <thead>
-
                 <tr>
-
-                  <th>
-                    Nome
-                  </th>
-
-                  <th>
-                    E-mail
-                  </th>
-
-                  <th>
-                    Status
-                  </th>
-
-                  <th>
-                    Ações
-                  </th>
-
+                  <th>ID</th>
+                  <th>Nome</th>
+                  <th>E-mail</th>
+                  <th>Telefone</th>
+                  <th>Status</th>
+                  <th>Ação</th>
                 </tr>
-
               </thead>
 
               <tbody>
-      `;
-
-      if (
-        missionarios.length === 0
-      ) {
-
-        html += `
-          <tr>
-
-            <td
-              colspan="4"
-              class="centralizado"
-            >
-              Nenhum missionário cadastrado.
-            </td>
-
-          </tr>
-        `;
-
-      } else {
-
-        for (
-          const missionario
-          of missionarios
-        ) {
-
-          html += `
-
-            <tr>
-
-              <td>
-                ${escaparHTML(
-                  missionario.nome
-                )}
-              </td>
-
-              <td>
-                ${escaparHTML(
-                  missionario.email
-                )}
-              </td>
-
-              <td>
-
                 ${
-                  missionario.ativo
-                    ? `
-                      <span class="ativo">
-                        ATIVO
-                      </span>
-                    `
-                    : `
-                      <span class="inativo">
-                        INATIVO
-                      </span>
-                    `
+                  linhas ||
+                  `
+                    <tr>
+                      <td colspan="6">
+                        Nenhum missionário cadastrado.
+                      </td>
+                    </tr>
+                  `
                 }
-
-              </td>
-
-              <td>
-
-                <div class="acoes">
-
-                  <a
-                    class="botao botao-cinza"
-                    href="/admin/missionarios/${missionario.id}/editar"
-                  >
-                    Editar
-                  </a>
-
-                  <form
-                    method="POST"
-                    action="/admin/missionarios/${missionario.id}/status"
-                  >
-
-                    <button
-                      class="${
-                        missionario.ativo
-                          ? "botao-vermelho"
-                          : "botao-verde"
-                      }"
-                      type="submit"
-                    >
-
-                      ${
-                        missionario.ativo
-                          ? "Desativar"
-                          : "Ativar"
-                      }
-
-                    </button>
-
-                  </form>
-
-                </div>
-
-              </td>
-
-            </tr>
-
-          `;
-        }
-
-      }
-
-      html += `
-
               </tbody>
 
             </table>
 
           </div>
 
-        </div>
+          <div class="card">
 
-        <div class="card">
+            <h2>
+              Mensagens recebidas
+            </h2>
 
-          <h2>
-            💬 Mensagens recebidas
-          </h2>
-
-          <div class="tabela-container">
+            <p>
+              Mensagens enviadas pelas famílias
+              e destinadas aos missionários.
+            </p>
 
             <table>
 
               <thead>
-
                 <tr>
-
-                  <th>
-                    Data
-                  </th>
-
-                  <th>
-                    Missionário
-                  </th>
-
-                  <th>
-                    Família
-                  </th>
-
-                  <th>
-                    Mensagem
-                  </th>
-
-                  <th>
-                    Status
-                  </th>
-
+                  <th>ID</th>
+                  <th>Missionário</th>
+                  <th>Família</th>
+                  <th>Mensagem</th>
+                  <th>Recebida em</th>
+                  <th>Status</th>
                 </tr>
-
               </thead>
 
               <tbody>
-      `;
-
-      if (
-        mensagens.length === 0
-      ) {
-
-        html += `
-
-          <tr>
-
-            <td
-              colspan="5"
-              class="centralizado"
-            >
-              Nenhuma mensagem recebida.
-            </td>
-
-          </tr>
-
-        `;
-
-      } else {
-
-        for (
-          const mensagem
-          of mensagens
-        ) {
-
-          html += `
-
-            <tr>
-
-              <td>
-
-                ${new Date(
-                  mensagem.criado_em
-                ).toLocaleString(
-                  "pt-BR",
-                  {
-                    timeZone:
-                      TIMEZONE
-                  }
-                )}
-
-              </td>
-
-              <td>
-
-                ${escaparHTML(
-                  mensagem.missionario_nome ||
-                  "Não informado"
-                )}
-
-              </td>
-
-              <td>
-
-                ${escaparHTML(
-                  mensagem.nome_familia ||
-                  ""
-                )}
-
-              </td>
-
-              <td>
-
-                ${escaparHTML(
-                  mensagem.mensagem
-                )}
-
-              </td>
-
-              <td>
-
                 ${
-                  mensagem.status === "ENVIADA"
-                    ? `
-                      <span class="enviada">
-                        ENVIADA
-                      </span>
-                    `
-                    : `
-                      <span class="pendente">
-                        PENDENTE
-                      </span>
-                    `
+                  linhasMensagens ||
+                  `
+                    <tr>
+                      <td colspan="6">
+                        Nenhuma mensagem recebida.
+                      </td>
+                    </tr>
+                  `
                 }
-
-              </td>
-
-            </tr>
-
-          `;
-        }
-
-      }
-
-      html += `
-
               </tbody>
 
             </table>
 
           </div>
 
-        </div>
-
-      `;
-
-      res
-        .status(200)
-        .send(
-          paginaHTML(
-            html,
-            "Painel - Mensagens Missionárias"
-          )
-        );
+        `)
+      );
 
     } catch (error) {
 
       console.error(
-        "ERRO AO CARREGAR /admin:",
+        "Erro ao carregar painel:",
         error
       );
 
       res
         .status(500)
         .send(
-          paginaHTML(
-            `
-
-            <div class="card">
-
-              <h2>
-                ❌ Erro ao carregar o painel
-              </h2>
-
-              <div class="erro">
-
-                <strong>
-                  O servidor respondeu, mas ocorreu
-                  um erro ao consultar o banco de dados.
-                </strong>
-
-              </div>
-
-              <p>
-                Detalhes técnicos:
-              </p>
-
-              <pre
-                style="
-                  white-space:pre-wrap;
-                  background:#f3f4f6;
-                  padding:15px;
-                  border-radius:8px;
-                  overflow:auto;
-                "
-              >${escaparHTML(
-                error?.message ||
-                String(error)
-              )}</pre>
-
-              <p>
-                Verifique também os logs do Render.
-              </p>
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Tentar novamente
-              </a>
-
-            </div>
-
-            `,
-            "Erro - Painel"
-          )
+          "Erro ao carregar painel."
         );
     }
   }
 );
 
 // ======================================================
-// ENVIO MANUAL DA COMPILAÇÃO
+// ENVIAR COMPILAÇÃO MANUALMENTE
 // ======================================================
 
 app.post(
@@ -2640,81 +2287,46 @@ app.post(
   verificarAdmin,
   async (req, res) => {
 
+    const senhaAdmin =
+      req.body.senha_admin;
+
     try {
+
+      console.log(
+        "Iniciando compilação manual..."
+      );
 
       const resultado =
         await enviarCompilacoesPendentes();
 
-      res
-        .status(200)
-        .send(
-          paginaHTML(
-            `
+      console.log(
+        "Resultado da compilação:",
+        resultado
+      );
 
-            <div class="card">
+      if (
+        resultado.mensagens === 0 &&
+        resultado.semEmail === 0 &&
+        resultado.erros === 0
+      ) {
 
-              <h2>
-                ✅ Compilação concluída!
-              </h2>
-
-              <div class="sucesso">
-
-                <strong>
-
-                  ${resultado.mensagens}
-                  mensagem(ns) enviada(s)
-                  para
-                  ${resultado.missionarios}
-                  missionário(s).
-
-                </strong>
-
-              </div>
-
-              ${
-                resultado.semEmail > 0
-                  ? `
-
-                    <div class="aviso">
-
-                      ${resultado.semEmail}
-                      missionário(s) sem e-mail cadastrado.
-
-                    </div>
-
-                  `
-                  : ""
-              }
-
-              ${
-                resultado.erros > 0
-                  ? `
-
-                    <div class="erro">
-
-                      Ocorreram
-                      ${resultado.erros}
-                      erro(s) durante o envio.
-
-                    </div>
-
-                  `
-                  : ""
-              }
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar ao painel
-              </a>
-
-            </div>
-
-            `,
-            "Compilação concluída"
-          )
+        return res.redirect(
+          `/admin?senha=${encodeURIComponent(
+            senhaAdmin
+          )}&compilacao=vazia`
         );
+      }
+
+      return res.redirect(
+        `/admin?senha=${encodeURIComponent(
+          senhaAdmin
+        )}` +
+        `&compilacao=ok` +
+        `&mensagens=${resultado.mensagens}` +
+        `&missionarios=${resultado.missionarios}` +
+        `&semEmail=${resultado.semEmail}` +
+        `&erros=${resultado.erros}`
+      );
 
     } catch (error) {
 
@@ -2723,46 +2335,17 @@ app.post(
         error
       );
 
-      res
-        .status(500)
-        .send(
-          paginaHTML(
-            `
-
-            <div class="card">
-
-              <h2>
-                ❌ Erro ao enviar compilação
-              </h2>
-
-              <div class="erro">
-
-                ${escaparHTML(
-                  error?.message ||
-                  String(error)
-                )}
-
-              </div>
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar ao painel
-              </a>
-
-            </div>
-
-            `,
-            "Erro"
-          )
-        );
+      return res.redirect(
+        `/admin?senha=${encodeURIComponent(
+          senhaAdmin
+        )}&compilacao=erro`
+      );
     }
   }
 );
 
 // ======================================================
-// TESTE DE E-MAIL
+// TESTE DE E-MAIL - RESEND
 // ======================================================
 
 app.post(
@@ -2770,21 +2353,36 @@ app.post(
   verificarAdmin,
   async (req, res) => {
 
+    const senhaAdmin =
+      req.body.senha_admin;
+
     try {
 
       if (!resend) {
-
         throw new Error(
           "RESEND_API_KEY não configurada."
         );
-
       }
 
       const emailTeste =
-        process.env.TEST_EMAIL ||
-        "mensagens@mail.familycode.com.br";
+        req.body
+          .email_teste
+          ?.trim();
 
-      const resposta =
+      if (!emailTeste) {
+
+        return res
+          .status(400)
+          .send(
+            "Informe um e-mail para realizar o teste."
+          );
+      }
+
+      console.log(
+        `Enviando e-mail de teste para ${emailTeste}...`
+      );
+
+      const resultado =
         await resend.emails.send({
 
           from:
@@ -2798,116 +2396,84 @@ app.post(
             "Teste - Mensagens Missionárias",
 
           html: `
-
             <div
               style="
-                font-family:Arial,sans-serif;
+                font-family: Arial, sans-serif;
+                max-width: 600px;
+                margin: auto;
+                line-height: 1.6;
               "
             >
 
-              <h1>
-                Mensagens Missionárias
-              </h1>
+              <h2>
+                💙 Mensagens Missionárias
+              </h2>
 
               <p>
-                Este é um e-mail de teste.
+                Este é um e-mail de teste do
+                sistema Mensagens Missionárias.
               </p>
 
               <p>
-                O sistema de envio de e-mails
-                está funcionando corretamente.
+                Se você recebeu esta mensagem,
+                a integração entre
+                <strong>Render</strong>
+                e
+                <strong>Resend</strong>
+                está funcionando.
+              </p>
+
+              <hr>
+
+              <p
+                style="
+                  color: #64748b;
+                  font-size: 13px;
+                "
+              >
+                Mensagens Missionárias
               </p>
 
             </div>
-
           `
         });
 
-      if (resposta.error) {
+      if (resultado.error) {
+
+        console.error(
+          "Erro retornado pelo Resend:",
+          resultado.error
+        );
 
         throw new Error(
-          resposta.error.message ||
-          JSON.stringify(
-            resposta.error
-          )
+          resultado.error.message ||
+          "Erro no Resend."
         );
-
       }
 
-      res
-        .status(200)
-        .send(
-          paginaHTML(
-            `
+      console.log(
+        "E-mail enviado pelo Resend:",
+        resultado.data
+      );
 
-            <div class="card">
-
-              <h2>
-                ✅ E-mail de teste enviado!
-              </h2>
-
-              <div class="sucesso">
-
-                O e-mail de teste foi enviado
-                com sucesso.
-
-              </div>
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar ao painel
-              </a>
-
-            </div>
-
-            `,
-            "Teste de e-mail"
-          )
-        );
+      res.redirect(
+        `/admin?senha=${encodeURIComponent(
+          senhaAdmin
+        )}&email=ok`
+      );
 
     } catch (error) {
 
       console.error(
-        "Erro no teste de e-mail:",
+        "Erro ao enviar e-mail de teste:",
         error
       );
 
-      res
-        .status(500)
-        .send(
-          paginaHTML(
-            `
-
-            <div class="card">
-
-              <h2>
-                ❌ Erro no teste de e-mail
-              </h2>
-
-              <div class="erro">
-
-                ${escaparHTML(
-                  error?.message ||
-                  String(error)
-                )}
-
-              </div>
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar ao painel
-              </a>
-
-            </div>
-
-            `,
-            "Erro"
-          )
-        );
+      res.redirect(
+        `/admin?senha=${encodeURIComponent(
+          senhaAdmin
+        )}&email=erro`
+      );
     }
   }
 );
@@ -2923,22 +2489,32 @@ app.post(
 
     try {
 
-      const nome =
-        String(
-          req.body?.nome || ""
-        ).trim();
+      const {
+        nome,
+        email,
+        telefone,
+        senha_admin
+      } = req.body;
 
-      const email =
-        String(
-          req.body?.email || ""
-        ).trim();
+      if (!nome?.trim()) {
 
-      if (!nome || !email) {
+        return res
+          .status(400)
+          .send(
+            "Nome obrigatório."
+          );
+      }
 
-        throw new Error(
-          "Nome e e-mail são obrigatórios."
-        );
+      if (
+        !email?.trim() &&
+        !telefone?.trim()
+      ) {
 
+        return res
+          .status(400)
+          .send(
+            "Informe e-mail ou telefone."
+          );
       }
 
       await pool.query(
@@ -2947,27 +2523,46 @@ app.post(
         (
           nome,
           email,
-          ativo
+          telefone
         )
+
         VALUES
         (
           $1,
           $2,
-          TRUE
+          $3
         )
         `,
         [
-          nome,
-          email
+          nome.trim(),
+          email?.trim() || null,
+          telefone?.trim() || null
         ]
       );
 
+      console.log(
+        `Missionário cadastrado: ${nome}`
+      );
+
       res.redirect(
-        303,
-        "/admin"
+        `/admin?senha=${encodeURIComponent(
+          senha_admin
+        )}`
       );
 
     } catch (error) {
+
+      if (
+        error.code ===
+        "23505"
+      ) {
+
+        return res
+          .status(409)
+          .send(
+            "Já existe um missionário com esse telefone."
+          );
+      }
 
       console.error(
         "Erro ao cadastrar missionário:",
@@ -2977,42 +2572,14 @@ app.post(
       res
         .status(500)
         .send(
-          paginaHTML(
-            `
-
-            <div class="card">
-
-              <h2>
-                ❌ Erro ao cadastrar missionário
-              </h2>
-
-              <div class="erro">
-
-                ${escaparHTML(
-                  error?.message ||
-                  String(error)
-                )}
-
-              </div>
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar ao painel
-              </a>
-
-            </div>
-
-            `
-          )
+          "Erro ao cadastrar missionário."
         );
     }
   }
 );
 
 // ======================================================
-// EDITAR MISSIONÁRIO
+// EDITAR MISSIONÁRIO - FORMULÁRIO
 // ======================================================
 
 app.get(
@@ -3022,22 +2589,6 @@ app.get(
 
     try {
 
-      const id =
-        Number.parseInt(
-          req.params.id,
-          10
-        );
-
-      if (
-        !Number.isInteger(id)
-      ) {
-
-        throw new Error(
-          "ID inválido."
-        );
-
-      }
-
       const resultado =
         await pool.query(
           `
@@ -3045,67 +2596,97 @@ app.get(
             id,
             nome,
             email,
+            telefone,
             ativo
           FROM missionarios
           WHERE id = $1
           `,
-          [id]
+          [
+            req.params.id
+          ]
         );
 
       if (
-        resultado.rows.length === 0
+        resultado.rowCount === 0
       ) {
 
         return res
           .status(404)
           .send(
-            paginaHTML(
-              `
-
+            paginaHTML(`
               <div class="card">
 
                 <h2>
                   Missionário não encontrado
                 </h2>
 
-                <a
-                  href="/admin"
-                  class="botao"
-                >
-                  Voltar
-                </a>
+                <p>
+                  O cadastro solicitado
+                  não existe.
+                </p>
 
               </div>
-
-              `
-            )
+            `)
           );
       }
 
       const missionario =
         resultado.rows[0];
 
+      const senha =
+        escaparHTML(
+          req.query.senha || ""
+        );
+
       res.send(
-        paginaHTML(
-          `
+        paginaHTML(`
 
           <div class="card">
 
             <h2>
-              ✏️ Editar missionário
+              Editar missionário
             </h2>
+
+            <p>
+              Você está alterando o cadastro de
+              <strong>
+                ${escaparHTML(
+                  missionario.nome
+                )}
+              </strong>.
+            </p>
+
+            <div class="info">
+
+              Esta edição mantém o mesmo
+              ID do missionário.
+
+              <br><br>
+
+              Portanto, as mensagens que
+              já estão vinculadas a ele
+              continuarão normalmente no
+              sistema.
+
+            </div>
 
             <form
               method="POST"
-              action="/admin/missionarios/${id}/editar"
+              action="/admin/missionarios/${missionario.id}/editar"
             >
 
-              <label for="nome">
-                Nome
+              <input
+                type="hidden"
+                name="senha_admin"
+                value="${senha}"
+              >
+
+              <label>
+                Nome do missionário
               </label>
 
               <input
-                id="nome"
+                type="text"
                 name="nome"
                 value="${escaparHTML(
                   missionario.nome
@@ -3113,86 +2694,82 @@ app.get(
                 required
               >
 
-              <label for="email">
+              <label>
                 E-mail
               </label>
 
               <input
-                id="email"
-                name="email"
                 type="email"
+                name="email"
                 value="${escaparHTML(
-                  missionario.email
+                  missionario.email ||
+                  ""
                 )}"
-                required
+              >
+
+              <label>
+                WhatsApp / telefone
+              </label>
+
+              <input
+                type="text"
+                name="telefone"
+                value="${escaparHTML(
+                  missionario.telefone ||
+                  ""
+                )}"
+                placeholder="5513999999999"
               >
 
               <button
+                class="principal"
                 type="submit"
-                class="botao-verde"
               >
                 Salvar alterações
               </button>
 
+            </form>
+
+            <p
+              style="
+                margin-top: 25px;
+              "
+            >
+
               <a
-                href="/admin"
-                class="botao botao-cinza"
+                href="/admin?senha=${encodeURIComponent(
+                  req.query.senha || ""
+                )}"
               >
-                Cancelar
+                ← Voltar ao painel
               </a>
 
-            </form>
+            </p>
 
           </div>
 
-          `,
-          "Editar missionário"
-        )
+        `)
       );
 
     } catch (error) {
 
       console.error(
-        "Erro ao abrir edição:",
+        "Erro ao abrir edição do missionário:",
         error
       );
 
       res
         .status(500)
         .send(
-          paginaHTML(
-            `
-
-            <div class="card">
-
-              <h2>
-                ❌ Erro
-              </h2>
-
-              <div class="erro">
-
-                ${escaparHTML(
-                  error?.message ||
-                  String(error)
-                )}
-
-              </div>
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar
-              </a>
-
-            </div>
-
-            `
-          )
+          "Erro ao carregar missionário."
         );
     }
   }
 );
+
+// ======================================================
+// EDITAR MISSIONÁRIO - SALVAR
+// ======================================================
 
 app.post(
   "/admin/missionarios/:id/editar",
@@ -3201,102 +2778,104 @@ app.post(
 
     try {
 
-      const id =
-        Number.parseInt(
-          req.params.id,
-          10
-        );
+      const {
+        nome,
+        email,
+        telefone,
+        senha_admin
+      } = req.body;
 
-      const nome =
-        String(
-          req.body?.nome || ""
-        ).trim();
+      if (!nome?.trim()) {
 
-      const email =
-        String(
-          req.body?.email || ""
-        ).trim();
-
-      if (
-        !Number.isInteger(id)
-      ) {
-
-        throw new Error(
-          "ID inválido."
-        );
-
+        return res
+          .status(400)
+          .send(
+            "Nome obrigatório."
+          );
       }
 
       if (
-        !nome ||
-        !email
+        !email?.trim() &&
+        !telefone?.trim()
       ) {
 
-        throw new Error(
-          "Nome e e-mail são obrigatórios."
-        );
-
+        return res
+          .status(400)
+          .send(
+            "Informe e-mail ou telefone."
+          );
       }
 
-      await pool.query(
-        `
-        UPDATE missionarios
-        SET
-          nome = $1,
-          email = $2
-        WHERE id = $3
-        `,
-        [
-          nome,
-          email,
-          id
-        ]
+      const resultado =
+        await pool.query(
+          `
+          UPDATE missionarios
+
+          SET
+            nome = $1,
+            email = $2,
+            telefone = $3
+
+          WHERE id = $4
+
+          RETURNING
+            id,
+            nome,
+            email,
+            telefone
+          `,
+          [
+            nome.trim(),
+            email?.trim() || null,
+            telefone?.trim() || null,
+            req.params.id
+          ]
+        );
+
+      if (
+        resultado.rowCount === 0
+      ) {
+
+        return res
+          .status(404)
+          .send(
+            "Missionário não encontrado."
+          );
+      }
+
+      console.log(
+        `Missionário ${resultado.rows[0].nome} atualizado com sucesso.`
       );
 
       res.redirect(
-        303,
-        "/admin"
+        `/admin?senha=${encodeURIComponent(
+          senha_admin
+        )}&editado=ok`
       );
 
     } catch (error) {
 
+      if (
+        error.code ===
+        "23505"
+      ) {
+
+        return res
+          .status(409)
+          .send(
+            "Esse telefone já está cadastrado para outro missionário."
+          );
+      }
+
       console.error(
-        "Erro ao editar missionário:",
+        "Erro ao atualizar missionário:",
         error
       );
 
       res
         .status(500)
         .send(
-          paginaHTML(
-            `
-
-            <div class="card">
-
-              <h2>
-                ❌ Erro ao editar missionário
-              </h2>
-
-              <div class="erro">
-
-                ${escaparHTML(
-                  error?.message ||
-                  String(error)
-                )}
-
-              </div>
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar ao painel
-              </a>
-
-            </div>
-
-            `
-          )
+          "Erro ao atualizar missionário."
         );
     }
   }
@@ -3313,34 +2892,26 @@ app.post(
 
     try {
 
-      const id =
-        Number.parseInt(
-          req.params.id,
-          10
-        );
-
-      if (
-        !Number.isInteger(id)
-      ) {
-
-        throw new Error(
-          "ID inválido."
-        );
-
-      }
+      const ativo =
+        req.body.ativo ===
+        "true";
 
       await pool.query(
         `
         UPDATE missionarios
-        SET ativo = NOT ativo
-        WHERE id = $1
+        SET ativo = $1
+        WHERE id = $2
         `,
-        [id]
+        [
+          ativo,
+          req.params.id
+        ]
       );
 
       res.redirect(
-        303,
-        "/admin"
+        `/admin?senha=${encodeURIComponent(
+          req.body.senha_admin
+        )}`
       );
 
     } catch (error) {
@@ -3353,36 +2924,453 @@ app.post(
       res
         .status(500)
         .send(
-          paginaHTML(
-            `
-
-            <div class="card">
-
-              <h2>
-                ❌ Erro
-              </h2>
-
-              <div class="erro">
-
-                ${escaparHTML(
-                  error?.message ||
-                  String(error)
-                )}
-
-              </div>
-
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar
-              </a>
-
-            </div>
-
-            `
-          )
+          "Erro ao alterar missionário."
         );
     }
   }
 );
+
+// ======================================================
+// VERIFICAÇÃO DO WEBHOOK
+// ======================================================
+
+app.get(
+  "/webhook",
+  (req, res) => {
+
+    const mode =
+      req.query[
+        "hub.mode"
+      ];
+
+    const token =
+      req.query[
+        "hub.verify_token"
+      ];
+
+    const challenge =
+      req.query[
+        "hub.challenge"
+      ];
+
+    if (
+      mode === "subscribe" &&
+      token === VERIFY_TOKEN
+    ) {
+
+      console.log(
+        "Webhook verificado com sucesso."
+      );
+
+      return res
+        .status(200)
+        .send(
+          challenge
+        );
+    }
+
+    return res
+      .sendStatus(403);
+  }
+);
+
+// ======================================================
+// WEBHOOK DO WHATSAPP
+// ======================================================
+
+app.post(
+  "/webhook",
+  async (req, res) => {
+
+    /*
+     * Respondemos imediatamente ao Meta
+     * para evitar timeout.
+     */
+
+    res.sendStatus(200);
+
+    try {
+
+      const value =
+        req.body
+          ?.entry?.[0]
+          ?.changes?.[0]
+          ?.value;
+
+      const message =
+        value
+          ?.messages?.[0];
+
+      const contact =
+        value
+          ?.contacts?.[0];
+
+      if (!message) {
+        return;
+      }
+
+      const whatsappMessageId =
+        message.id;
+
+      const telefone =
+        message.from;
+
+      const nome =
+        contact
+          ?.profile
+          ?.name ||
+        "Sem nome";
+
+      const tipo =
+        message.type ||
+        "desconhecido";
+
+      /*
+       * Texto normal.
+       */
+
+      let texto =
+        message
+          .text
+          ?.body || "";
+
+      /*
+       * ID do missionário escolhido
+       * pelo menu interativo.
+       */
+
+      let missionarioSelecionadoId =
+        null;
+
+      /*
+       * Verifica se o usuário clicou
+       * em uma opção da lista.
+       */
+
+      if (
+        tipo === "interactive" &&
+        message
+          .interactive
+          ?.type === "list_reply"
+      ) {
+
+        const idSelecionado =
+          message
+            .interactive
+            ?.list_reply
+            ?.id;
+
+        const tituloSelecionado =
+          message
+            .interactive
+            ?.list_reply
+            ?.title ||
+          "";
+
+        if (
+          idSelecionado
+            ?.startsWith(
+              "missionario_"
+            )
+        ) {
+
+          missionarioSelecionadoId =
+            Number.parseInt(
+              idSelecionado.replace(
+                "missionario_",
+                ""
+              ),
+              10
+            );
+        }
+
+        texto =
+          tituloSelecionado;
+
+        console.log(
+          `Opção selecionada no menu: ${tituloSelecionado}`
+        );
+
+        console.log(
+          `ID do missionário selecionado: ${missionarioSelecionadoId}`
+        );
+      }
+
+      console.log(
+        "Nova mensagem recebida:"
+      );
+
+      console.log(
+        `Nome: ${nome}`
+      );
+
+      console.log(
+        `Telefone: ${telefone}`
+      );
+
+      console.log(
+        `Mensagem: ${texto}`
+      );
+
+      console.log(
+        `Tipo: ${tipo}`
+      );
+
+      /*
+       * Salva também no histórico geral
+       * de mensagens.
+       */
+
+      const registro =
+        await pool.query(
+          `
+          INSERT INTO mensagens
+          (
+            whatsapp_message_id,
+            nome,
+            telefone,
+            mensagem,
+            tipo
+          )
+
+          VALUES
+          (
+            $1,
+            $2,
+            $3,
+            $4,
+            $5
+          )
+
+          ON CONFLICT
+          (whatsapp_message_id)
+          DO NOTHING
+
+          RETURNING id
+          `,
+          [
+            whatsappMessageId,
+            nome,
+            telefone,
+            texto,
+            tipo
+          ]
+        );
+
+      if (
+        registro.rowCount ===
+        0
+      ) {
+
+        console.log(
+          "Mensagem já processada anteriormente."
+        );
+
+        return;
+      }
+
+      console.log(
+        "Mensagem salva no banco de dados."
+      );
+
+      /*
+       * Aceitamos:
+       *
+       * - mensagem de texto
+       * - escolha de lista interativa
+       */
+
+      const mensagemValida =
+        tipo === "text" ||
+        (
+          tipo === "interactive" &&
+          message
+            .interactive
+            ?.type === "list_reply"
+        );
+
+      if (
+        !mensagemValida
+      ) {
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Por enquanto, envie sua mensagem em formato de texto ou utilize o menu disponível."
+        );
+
+        return;
+      }
+
+      await processarConversa(
+        telefone,
+        texto,
+        whatsappMessageId,
+        missionarioSelecionadoId
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Erro ao processar webhook:",
+        error
+      );
+    }
+  }
+);
+
+// ======================================================
+// ENVIO AUTOMÁTICO SEMANAL
+// ======================================================
+
+function iniciarAgendamentoSemanal() {
+
+  if (
+    !cron.validate(
+      WEEKLY_CRON
+    )
+  ) {
+
+    console.error(
+      `WEEKLY_CRON inválido: ${WEEKLY_CRON}`
+    );
+
+    return;
+  }
+
+  console.log(
+    `Compilação semanal agendada: ${WEEKLY_CRON}`
+  );
+
+  console.log(
+    `Fuso horário da compilação: ${TIMEZONE}`
+  );
+
+  cron.schedule(
+    WEEKLY_CRON,
+
+    async () => {
+
+      console.log(
+        "=========================================="
+      );
+
+      console.log(
+        "Iniciando compilação semanal automática..."
+      );
+
+      console.log(
+        `Data/hora: ${new Date().toLocaleString(
+          "pt-BR",
+          {
+            timeZone:
+              TIMEZONE
+          }
+        )}`
+      );
+
+      try {
+
+        const resultado =
+          await enviarCompilacoesPendentes();
+
+        console.log(
+          "Resultado da compilação semanal automática:",
+          resultado
+        );
+
+        if (
+          resultado.mensagens === 0 &&
+          resultado.semEmail === 0 &&
+          resultado.erros === 0
+        ) {
+
+          console.log(
+            "Nenhuma mensagem pendente para a compilação desta semana."
+          );
+
+          console.log(
+            "=========================================="
+          );
+
+          return;
+        }
+
+        console.log(
+          `Compilação automática concluída: ${resultado.mensagens} mensagem(ns) enviada(s) para ${resultado.missionarios} missionário(s).`
+        );
+
+        if (
+          resultado.semEmail > 0
+        ) {
+
+          console.log(
+            `${resultado.semEmail} missionário(s) sem e-mail cadastrado.`
+          );
+        }
+
+        if (
+          resultado.erros > 0
+        ) {
+
+          console.error(
+            `${resultado.erros} envio(s) apresentou(aram) erro. As respectivas mensagens permaneceram PENDENTES.`
+          );
+        }
+
+      } catch (error) {
+
+        console.error(
+          "Erro na compilação semanal automática:",
+          error
+        );
+      }
+
+      console.log(
+        "=========================================="
+      );
+    },
+
+    {
+      timezone:
+        TIMEZONE,
+
+      noOverlap:
+        true
+    }
+  );
+}
+
+// ======================================================
+// INICIALIZAÇÃO
+// ======================================================
+
+async function iniciarServidor() {
+
+  try {
+
+    await inicializarBanco();
+
+    iniciarAgendamentoSemanal();
+
+    app.listen(
+      PORT,
+      () => {
+
+        console.log(
+          `Servidor iniciado na porta ${PORT}`
+        );
+      }
+    );
+
+  } catch (error) {
+
+    console.error(
+      "Não foi possível iniciar o servidor:",
+      error
+    );
+
+    process.exit(1);
+  }
+}
+
+iniciarServidor();
