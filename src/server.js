@@ -1,6 +1,7 @@
 import express from "express";
 import pg from "pg";
 import cron from "node-cron";
+import crypto from "crypto";
 import { Resend } from "resend";
 
 const { Pool } = pg;
@@ -258,6 +259,19 @@ function paginaHTML(
       color: white;
     }
 
+    .sair {
+      background: #64748b;
+      color: white;
+      float: right;
+    }
+
+    .login-button {
+      width: 100%;
+      margin-top: 20px;
+      background: #173b57;
+      color: white;
+    }
+
     .sucesso {
       padding: 14px;
       margin-bottom: 20px;
@@ -379,6 +393,11 @@ function paginaHTML(
       margin: 0;
     }
 
+    .topo-painel {
+      overflow: auto;
+      margin-bottom: 20px;
+    }
+
     @media (max-width: 700px) {
       table,
       thead,
@@ -403,6 +422,11 @@ function paginaHTML(
       td {
         border: 0;
         padding: 7px;
+      }
+
+      .sair {
+        float: none;
+        margin-top: 15px;
       }
     }
   </style>
@@ -431,61 +455,179 @@ function paginaHTML(
 // SEGURANÇA DO PAINEL
 // ======================================================
 
-function verificarAdmin(req, res, next) {
-  const senha =
-    req.headers["x-admin-password"] ||
-    req.query.senha ||
-    req.body?.senha_admin;
+function criarTokenAdmin() {
+  return crypto
+    .createHmac(
+      "sha256",
+      ADMIN_PASSWORD || ""
+    )
+    .update("mensagens-missionarias-admin")
+    .digest("hex");
+}
 
+function obterCookies(req) {
+  const cabecalho =
+    req.headers.cookie || "";
+
+  const cookies = {};
+
+  cabecalho
+    .split(";")
+    .forEach((item) => {
+      const partes =
+        item.trim().split("=");
+
+      if (partes.length >= 2) {
+        const nome =
+          partes.shift();
+
+        const valor =
+          partes.join("=");
+
+        cookies[nome] =
+          decodeURIComponent(valor);
+      }
+    });
+
+  return cookies;
+}
+
+function usuarioEstaAutenticado(req) {
+  if (!ADMIN_PASSWORD) {
+    return false;
+  }
+
+  const cookies =
+    obterCookies(req);
+
+  const token =
+    cookies.admin_session;
+
+  if (!token) {
+    return false;
+  }
+
+  const tokenEsperado =
+    criarTokenAdmin();
+
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(token),
+      Buffer.from(tokenEsperado)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function enviarCookieLogin(res) {
+  const token =
+    criarTokenAdmin();
+
+  const seguro =
+    process.env.NODE_ENV ===
+    "production"
+      ? " Secure;"
+      : "";
+
+  res.setHeader(
+    "Set-Cookie",
+    `admin_session=${encodeURIComponent(
+      token
+    )}; HttpOnly; SameSite=Lax; Max-Age=28800; Path=/${seguro}`
+  );
+}
+
+function apagarCookieLogin(res) {
+  res.setHeader(
+    "Set-Cookie",
+    "admin_session=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/"
+  );
+}
+
+function paginaLogin(
+  mensagem = ""
+) {
+  return paginaHTML(
+    `
+      <div class="card login">
+
+        <h2>
+          🔐 Acesso administrativo
+        </h2>
+
+        <p>
+          Digite a senha para acessar o
+          painel do Mensagens Missionárias.
+        </p>
+
+        ${
+          mensagem
+            ? `
+              <div class="erro">
+                ${escaparHTML(mensagem)}
+              </div>
+            `
+            : ""
+        }
+
+        <form
+          method="POST"
+          action="/admin/login"
+        >
+
+          <label>
+            Senha
+          </label>
+
+          <input
+            type="password"
+            name="senha"
+            autocomplete="current-password"
+            required
+          >
+
+          <button
+            class="login-button"
+            type="submit"
+          >
+            Entrar no painel
+          </button>
+
+        </form>
+
+      </div>
+    `,
+    "Login - Mensagens Missionárias"
+  );
+}
+
+function verificarAdmin(req, res, next) {
   if (!ADMIN_PASSWORD) {
     return res
       .status(500)
       .send(
-        "ADMIN_PASSWORD não configurado."
-      );
-  }
-
-  if (senha !== ADMIN_PASSWORD) {
-    return res
-      .status(401)
-      .send(
         paginaHTML(`
-          <div class="card login">
-
+          <div class="card">
             <h2>
-              Acesso administrativo
+              Erro de configuração
             </h2>
 
             <p>
-              Digite a senha do painel.
+              A variável
+              <strong>ADMIN_PASSWORD</strong>
+              não está configurada no Render.
             </p>
-
-            <form
-              method="GET"
-              action="/admin"
-            >
-
-              <label>
-                Senha
-              </label>
-
-              <input
-                type="password"
-                name="senha"
-                required
-              >
-
-              <button
-                class="principal"
-                type="submit"
-              >
-                Entrar
-              </button>
-
-            </form>
-
           </div>
         `)
+      );
+  }
+
+  if (!usuarioEstaAutenticado(req)) {
+    return res
+      .status(401)
+      .send(
+        paginaLogin()
       );
   }
 
@@ -752,12 +894,6 @@ async function enviarMenuMissionarios(
         )
       );
 
-      /*
-       * Se a API não aceitar o menu,
-       * usamos automaticamente o
-       * menu de texto.
-       */
-
       let texto =
         "💙 *Mensagens Missionárias*\n\n" +
         "Para qual missionário você deseja enviar uma mensagem?\n\n";
@@ -790,10 +926,6 @@ async function enviarMenuMissionarios(
       "Erro ao enviar menu interativo:",
       error
     );
-
-    /*
-     * Fallback para menu de texto.
-     */
 
     let texto =
       "💙 *Mensagens Missionárias*\n\n" +
@@ -956,11 +1088,6 @@ async function processarConversa(
 
     let missionario;
 
-    /*
-     * Se o usuário clicou no menu,
-     * recebemos diretamente o ID.
-     */
-
     if (
       missionarioSelecionadoId
     ) {
@@ -997,11 +1124,6 @@ async function processarConversa(
         resultado.rows[0];
 
     } else {
-
-      /*
-       * Mantém compatibilidade
-       * com o antigo menu numérico.
-       */
 
       const numero =
         Number.parseInt(
@@ -1214,10 +1336,6 @@ async function processarConversa(
 
     return;
   }
-
-  // ==================================================
-  // REINÍCIO
-  // ==================================================
 
   await reiniciarConversa(
     telefone
@@ -1623,6 +1741,91 @@ app.get(
 );
 
 // ======================================================
+// LOGIN DO PAINEL
+// ======================================================
+
+app.get(
+  "/admin/login",
+  (req, res) => {
+    res.send(
+      paginaLogin()
+    );
+  }
+);
+
+app.post(
+  "/admin/login",
+  (req, res) => {
+
+    if (!ADMIN_PASSWORD) {
+      return res
+        .status(500)
+        .send(
+          paginaHTML(`
+            <div class="card">
+              <h2>
+                Erro de configuração
+              </h2>
+
+              <p>
+                A variável
+                <strong>ADMIN_PASSWORD</strong>
+                não está configurada no Render.
+              </p>
+            </div>
+          `)
+        );
+    }
+
+    const senha =
+      req.body.senha || "";
+
+    if (
+      senha !== ADMIN_PASSWORD
+    ) {
+
+      return res
+        .status(401)
+        .send(
+          paginaLogin(
+            "Senha incorreta."
+          )
+        );
+    }
+
+    enviarCookieLogin(res);
+
+    console.log(
+      "Login administrativo realizado com sucesso."
+    );
+
+    return res.redirect(
+      "/admin"
+    );
+  }
+);
+
+// ======================================================
+// LOGOUT DO PAINEL
+// ======================================================
+
+app.post(
+  "/admin/logout",
+  (req, res) => {
+
+    apagarCookieLogin(res);
+
+    console.log(
+      "Logout administrativo realizado."
+    );
+
+    res.redirect(
+      "/admin/login"
+    );
+  }
+);
+
+// ======================================================
 // PAINEL ADMINISTRATIVO
 // ======================================================
 
@@ -1690,11 +1893,6 @@ app.get(
           FROM
             mensagens_missionarios
         `);
-
-      const senha =
-        escaparHTML(
-          req.query.senha || ""
-        );
 
       let aviso = "";
 
@@ -1876,9 +2074,7 @@ app.get(
 
                     <a
                       class="botao editar"
-                      href="/admin/missionarios/${missionario.id}/editar?senha=${encodeURIComponent(
-                        req.query.senha || ""
-                      )}"
+                      href="/admin/missionarios/${missionario.id}/editar"
                     >
                       Editar
                     </a>
@@ -1887,12 +2083,6 @@ app.get(
                       method="POST"
                       action="/admin/missionarios/${missionario.id}/status"
                     >
-
-                      <input
-                        type="hidden"
-                        name="senha_admin"
-                        value="${senha}"
-                      >
 
                       <input
                         type="hidden"
@@ -2008,6 +2198,24 @@ app.get(
       res.send(
         paginaHTML(`
 
+          <div class="topo-painel">
+
+            <form
+              method="POST"
+              action="/admin/logout"
+            >
+
+              <button
+                class="sair"
+                type="submit"
+              >
+                Sair
+              </button>
+
+            </form>
+
+          </div>
+
           ${aviso}
 
           <div class="estatisticas">
@@ -2064,12 +2272,6 @@ app.get(
               "
             >
 
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
-
               <button
                 class="compilacao"
                 type="submit"
@@ -2097,12 +2299,6 @@ app.get(
               method="POST"
               action="/admin/testar-email"
             >
-
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
 
               <label>
                 E-mail para o teste
@@ -2135,12 +2331,6 @@ app.get(
               method="POST"
               action="/admin/missionarios"
             >
-
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
 
               <label>
                 Nome do missionário
@@ -2287,9 +2477,6 @@ app.post(
   verificarAdmin,
   async (req, res) => {
 
-    const senhaAdmin =
-      req.body.senha_admin;
-
     try {
 
       console.log(
@@ -2311,17 +2498,13 @@ app.post(
       ) {
 
         return res.redirect(
-          `/admin?senha=${encodeURIComponent(
-            senhaAdmin
-          )}&compilacao=vazia`
+          `/admin?compilacao=vazia`
         );
       }
 
       return res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}` +
-        `&compilacao=ok` +
+        `/admin` +
+        `?compilacao=ok` +
         `&mensagens=${resultado.mensagens}` +
         `&missionarios=${resultado.missionarios}` +
         `&semEmail=${resultado.semEmail}` +
@@ -2336,9 +2519,7 @@ app.post(
       );
 
       return res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}&compilacao=erro`
+        `/admin?compilacao=erro`
       );
     }
   }
@@ -2352,9 +2533,6 @@ app.post(
   "/admin/testar-email",
   verificarAdmin,
   async (req, res) => {
-
-    const senhaAdmin =
-      req.body.senha_admin;
 
     try {
 
@@ -2457,9 +2635,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}&email=ok`
+        `/admin?email=ok`
       );
 
     } catch (error) {
@@ -2470,9 +2646,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}&email=erro`
+        `/admin?email=erro`
       );
     }
   }
@@ -2492,8 +2666,7 @@ app.post(
       const {
         nome,
         email,
-        telefone,
-        senha_admin
+        telefone
       } = req.body;
 
       if (!nome?.trim()) {
@@ -2545,9 +2718,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senha_admin
-        )}`
+        `/admin`
       );
 
     } catch (error) {
@@ -2633,11 +2804,6 @@ app.get(
       const missionario =
         resultado.rows[0];
 
-      const senha =
-        escaparHTML(
-          req.query.senha || ""
-        );
-
       res.send(
         paginaHTML(`
 
@@ -2674,12 +2840,6 @@ app.get(
               method="POST"
               action="/admin/missionarios/${missionario.id}/editar"
             >
-
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
 
               <label>
                 Nome do missionário
@@ -2737,9 +2897,7 @@ app.get(
             >
 
               <a
-                href="/admin?senha=${encodeURIComponent(
-                  req.query.senha || ""
-                )}"
+                href="/admin"
               >
                 ← Voltar ao painel
               </a>
@@ -2781,8 +2939,7 @@ app.post(
       const {
         nome,
         email,
-        telefone,
-        senha_admin
+        telefone
       } = req.body;
 
       if (!nome?.trim()) {
@@ -2848,9 +3005,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senha_admin
-        )}&editado=ok`
+        `/admin?editado=ok`
       );
 
     } catch (error) {
@@ -2909,9 +3064,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          req.body.senha_admin
-        )}`
+        `/admin`
       );
 
     } catch (error) {
@@ -2982,11 +3135,6 @@ app.post(
   "/webhook",
   async (req, res) => {
 
-    /*
-     * Respondemos imediatamente ao Meta
-     * para evitar timeout.
-     */
-
     res.sendStatus(200);
 
     try {
@@ -3025,27 +3173,13 @@ app.post(
         message.type ||
         "desconhecido";
 
-      /*
-       * Texto normal.
-       */
-
       let texto =
         message
           .text
           ?.body || "";
 
-      /*
-       * ID do missionário escolhido
-       * pelo menu interativo.
-       */
-
       let missionarioSelecionadoId =
         null;
-
-      /*
-       * Verifica se o usuário clicou
-       * em uma opção da lista.
-       */
 
       if (
         tipo === "interactive" &&
@@ -3116,11 +3250,6 @@ app.post(
         `Tipo: ${tipo}`
       );
 
-      /*
-       * Salva também no histórico geral
-       * de mensagens.
-       */
-
       const registro =
         await pool.query(
           `
@@ -3172,13 +3301,6 @@ app.post(
       console.log(
         "Mensagem salva no banco de dados."
       );
-
-      /*
-       * Aceitamos:
-       *
-       * - mensagem de texto
-       * - escolha de lista interativa
-       */
 
       const mensagemValida =
         tipo === "text" ||
