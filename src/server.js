@@ -44,16 +44,29 @@ function escaparHTML(valor = "") {
     .replace(/'/g, "&#039;");
 }
 
-function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
+function paginaHTML(
+  conteudo,
+  titulo = "Mensagens Missionárias"
+) {
   return `
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
+
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${escaparHTML(titulo)}</title>
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
+
+  <title>
+    ${escaparHTML(titulo)}
+  </title>
 
   <style>
+
     * {
       box-sizing: border-box;
     }
@@ -309,12 +322,15 @@ function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
     }
 
     @media (max-width: 800px) {
+
       .estatisticas {
         grid-template-columns: repeat(2, 1fr);
       }
+
     }
 
     @media (max-width: 500px) {
+
       .estatisticas {
         grid-template-columns: 1fr;
       }
@@ -331,30 +347,49 @@ function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
         flex-direction: column;
         align-items: flex-start;
       }
+
     }
+
   </style>
+
 </head>
 
 <body>
 
   <header>
+
     <div class="topo">
+
       <div>
-        <h1>Mensagens Missionárias</h1>
-        <p>Painel administrativo</p>
+
+        <h1>
+          Mensagens Missionárias
+        </h1>
+
+        <p>
+          Painel administrativo
+        </p>
+
       </div>
+
     </div>
+
   </header>
 
   <main>
+
     ${conteudo}
+
   </main>
 
   <footer>
+
     Mensagens Missionárias
+
   </footer>
 
 </body>
+
 </html>
 `;
 }
@@ -364,60 +399,93 @@ function paginaHTML(conteudo, titulo = "Mensagens Missionárias") {
 // ======================================================
 
 function criarTokenAdmin() {
+
   return crypto
     .createHmac(
       "sha256",
       ADMIN_PASSWORD || ""
     )
-    .update("mensagens-missionarias-admin")
+    .update(
+      "mensagens-missionarias-admin"
+    )
     .digest("hex");
 }
 
 function obterCookies(req) {
-  const cabecalho = req.headers.cookie || "";
+
+  const cabecalho =
+    req.headers.cookie || "";
+
   const cookies = {};
 
   if (!cabecalho) {
     return cookies;
   }
 
-  cabecalho.split(";").forEach((item) => {
-    const partes = item.trim().split("=");
+  cabecalho
+    .split(";")
+    .forEach((item) => {
 
-    if (partes.length >= 2) {
-      const nome = partes.shift();
-      const valor = partes.join("=");
+      const partes =
+        item.trim().split("=");
 
-      try {
-        cookies[nome] = decodeURIComponent(valor);
-      } catch {
-        cookies[nome] = valor;
+      if (partes.length >= 2) {
+
+        const nome =
+          partes.shift();
+
+        const valor =
+          partes.join("=");
+
+        try {
+
+          cookies[nome] =
+            decodeURIComponent(valor);
+
+        } catch {
+
+          cookies[nome] = valor;
+
+        }
+
       }
-    }
-  });
+
+    });
 
   return cookies;
 }
 
 function usuarioEstaAutenticado(req) {
+
   if (!ADMIN_PASSWORD) {
     return false;
   }
 
-  const cookies = obterCookies(req);
-  const token = cookies.admin_session;
+  const cookies =
+    obterCookies(req);
+
+  const token =
+    cookies.admin_session;
 
   if (!token) {
     return false;
   }
 
-  const tokenEsperado = criarTokenAdmin();
+  const tokenEsperado =
+    criarTokenAdmin();
 
   try {
-    const tokenBuffer = Buffer.from(token);
-    const esperadoBuffer = Buffer.from(tokenEsperado);
 
-    if (tokenBuffer.length !== esperadoBuffer.length) {
+    const tokenBuffer =
+      Buffer.from(token);
+
+    const esperadoBuffer =
+      Buffer.from(tokenEsperado);
+
+    if (
+      tokenBuffer.length !==
+      esperadoBuffer.length
+    ) {
       return false;
     }
 
@@ -425,13 +493,18 @@ function usuarioEstaAutenticado(req) {
       tokenBuffer,
       esperadoBuffer
     );
+
   } catch {
+
     return false;
+
   }
 }
 
 function enviarCookieLogin(res) {
-  const token = criarTokenAdmin();
+
+  const token =
+    criarTokenAdmin();
 
   res.setHeader(
     "Set-Cookie",
@@ -440,18 +513,24 @@ function enviarCookieLogin(res) {
 }
 
 function apagarCookieLogin(res) {
+
   res.setHeader(
     "Set-Cookie",
     "admin_session=; HttpOnly; SameSite=Lax; Max-Age=0; Path=/; Secure"
   );
 }
 
-function paginaLogin(mensagem = "") {
+function paginaLogin(
+  mensagem = ""
+) {
+
   return paginaHTML(
     `
     <div class="card login">
 
-      <h2>🔐 Acesso administrativo</h2>
+      <h2>
+        🔐 Acesso administrativo
+      </h2>
 
       <p>
         Digite a senha para acessar o painel do
@@ -460,11 +539,18 @@ function paginaLogin(mensagem = "") {
 
       ${
         mensagem
-          ? `<div class="erro">${escaparHTML(mensagem)}</div>`
+          ? `
+            <div class="erro">
+              ${escaparHTML(mensagem)}
+            </div>
+          `
           : ""
       }
 
-      <form method="POST" action="/admin/login">
+      <form
+        method="POST"
+        action="/admin/login"
+      >
 
         <label for="senha">
           Senha
@@ -493,7 +579,11 @@ function paginaLogin(mensagem = "") {
   );
 }
 
-function verificarAdmin(req, res, next) {
+function verificarAdmin(
+  req,
+  res,
+  next
+) {
 
   res.setHeader(
     "Cache-Control",
@@ -506,22 +596,29 @@ function verificarAdmin(req, res, next) {
   );
 
   if (!ADMIN_PASSWORD) {
+
     return res.status(500).send(
       paginaHTML(
         `
         <div class="card">
-          <h2>⚠️ Erro de configuração</h2>
+
+          <h2>
+            ⚠️ Erro de configuração
+          </h2>
 
           <div class="erro">
+
             A variável
             <strong>ADMIN_PASSWORD</strong>
             não está configurada no Render.
+
           </div>
 
           <p>
-            Cadastre a variável ADMIN_PASSWORD nas variáveis
-            de ambiente do serviço.
+            Cadastre a variável ADMIN_PASSWORD
+            nas variáveis de ambiente do serviço.
           </p>
+
         </div>
         `,
         "Erro - Mensagens Missionárias"
@@ -529,7 +626,10 @@ function verificarAdmin(req, res, next) {
     );
   }
 
-  if (!usuarioEstaAutenticado(req)) {
+  if (
+    !usuarioEstaAutenticado(req)
+  ) {
+
     return res.status(401).send(
       paginaLogin()
     );
@@ -545,9 +645,11 @@ function verificarAdmin(req, res, next) {
 async function inicializarBanco() {
 
   if (!DATABASE_URL) {
+
     throw new Error(
       "DATABASE_URL não está configurada."
     );
+
   }
 
   await pool.query(`
@@ -560,7 +662,9 @@ async function inicializarBanco() {
     )
   `);
 
-  console.log("Tabela mensagens pronta.");
+  console.log(
+    "Tabela mensagens pronta."
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS missionarios (
@@ -572,7 +676,9 @@ async function inicializarBanco() {
     )
   `);
 
-  console.log("Tabela missionarios pronta.");
+  console.log(
+    "Tabela missionarios pronta."
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS conversas (
@@ -585,7 +691,9 @@ async function inicializarBanco() {
     )
   `);
 
-  console.log("Tabela conversas pronta.");
+  console.log(
+    "Tabela conversas pronta."
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS mensagens_missionarios (
@@ -600,16 +708,26 @@ async function inicializarBanco() {
     )
   `);
 
-  console.log("Tabela mensagens_missionarios pronta.");
+  console.log(
+    "Tabela mensagens_missionarios pronta."
+  );
 
-  console.log("Banco de dados conectado.");
+  console.log(
+    "Banco de dados conectado."
+  );
 
   if (resend) {
-    console.log("Resend configurado.");
+
+    console.log(
+      "Resend configurado."
+    );
+
   } else {
+
     console.log(
       "AVISO: RESEND_API_KEY não configurada."
     );
+
   }
 }
 
@@ -622,7 +740,11 @@ async function enviarMensagemWhatsApp(
   texto
 ) {
 
-  if (!WHATSAPP_TOKEN || !PHONE_NUMBER_ID) {
+  if (
+    !WHATSAPP_TOKEN ||
+    !PHONE_NUMBER_ID
+  ) {
+
     console.error(
       "WHATSAPP_TOKEN ou PHONE_NUMBER_ID não configurado."
     );
@@ -632,39 +754,61 @@ async function enviarMensagemWhatsApp(
 
   try {
 
-    const resposta = await fetch(
-      `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        method: "POST",
+    const resposta =
+      await fetch(
+        `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
+        {
+          method: "POST",
 
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json"
-        },
+          headers: {
+            Authorization:
+              `Bearer ${WHATSAPP_TOKEN}`,
 
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          recipient_type: "individual",
-          to: telefone,
-          type: "text",
-          text: {
-            preview_url: false,
-            body: texto
-          }
-        })
-      }
-    );
+            "Content-Type":
+              "application/json"
+          },
 
-    const dados = await resposta.json();
+          body: JSON.stringify({
+
+            messaging_product:
+              "whatsapp",
+
+            recipient_type:
+              "individual",
+
+            to: telefone,
+
+            type: "text",
+
+            text: {
+              preview_url: false,
+              body: texto
+            }
+
+          })
+        }
+      );
+
+    const dados =
+      await resposta.json();
 
     if (!resposta.ok) {
+
       console.error(
         "Erro WhatsApp:",
-        JSON.stringify(dados, null, 2)
+        JSON.stringify(
+          dados,
+          null,
+          2
+        )
       );
 
       return false;
     }
+
+    console.log(
+      "Mensagem enviada pelo WhatsApp com sucesso."
+    );
 
     return true;
 
@@ -683,18 +827,24 @@ async function enviarMensagemWhatsApp(
 // CONVERSAS
 // ======================================================
 
-async function obterConversa(telefone) {
+async function obterConversa(
+  telefone
+) {
 
-  const resultado = await pool.query(
-    `
-    SELECT *
-    FROM conversas
-    WHERE telefone = $1
-    `,
-    [telefone]
+  const resultado =
+    await pool.query(
+      `
+      SELECT *
+      FROM conversas
+      WHERE telefone = $1
+      `,
+      [telefone]
+    );
+
+  return (
+    resultado.rows[0] ||
+    null
   );
-
-  return resultado.rows[0] || null;
 }
 
 async function salvarEtapa(
@@ -707,23 +857,37 @@ async function salvarEtapa(
   await pool.query(
     `
     INSERT INTO conversas
-      (
-        telefone,
-        etapa,
-        missionario_id,
-        nome_familia,
-        atualizado_em
-      )
+    (
+      telefone,
+      etapa,
+      missionario_id,
+      nome_familia,
+      atualizado_em
+    )
     VALUES
-      ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+    (
+      $1,
+      $2,
+      $3,
+      $4,
+      CURRENT_TIMESTAMP
+    )
 
     ON CONFLICT (telefone)
 
     DO UPDATE SET
-      etapa = EXCLUDED.etapa,
-      missionario_id = EXCLUDED.missionario_id,
-      nome_familia = EXCLUDED.nome_familia,
-      atualizado_em = CURRENT_TIMESTAMP
+
+      etapa =
+        EXCLUDED.etapa,
+
+      missionario_id =
+        EXCLUDED.missionario_id,
+
+      nome_familia =
+        EXCLUDED.nome_familia,
+
+      atualizado_em =
+        CURRENT_TIMESTAMP
     `,
     [
       telefone,
@@ -734,16 +898,23 @@ async function salvarEtapa(
   );
 }
 
-async function enviarMenuMissionarios(telefone) {
+async function enviarMenuMissionarios(
+  telefone
+) {
 
-  const resultado = await pool.query(`
-    SELECT id, nome
-    FROM missionarios
-    WHERE ativo = TRUE
-    ORDER BY nome ASC
-  `);
+  const resultado =
+    await pool.query(`
+      SELECT
+        id,
+        nome
+      FROM missionarios
+      WHERE ativo = TRUE
+      ORDER BY nome ASC
+    `);
 
-  if (resultado.rows.length === 0) {
+  if (
+    resultado.rows.length === 0
+  ) {
 
     await enviarMensagemWhatsApp(
       telefone,
@@ -758,14 +929,19 @@ async function enviarMenuMissionarios(telefone) {
     "AGUARDANDO_MISSIONARIO"
   );
 
-  if (resultado.rows.length > 10) {
+  if (
+    resultado.rows.length > 10
+  ) {
 
     let texto =
       "Escolha o missionário digitando o número correspondente:\n\n";
 
     resultado.rows.forEach(
       (missionario, indice) => {
-        texto += `${indice + 1} - ${missionario.nome}\n`;
+
+        texto +=
+          `${indice + 1} - ${missionario.nome}\n`;
+
       }
     );
 
@@ -777,58 +953,106 @@ async function enviarMenuMissionarios(telefone) {
     return;
   }
 
-  const rows = resultado.rows.map(
-    (missionario) => ({
-      id: `missionario_${missionario.id}`,
-      title: missionario.nome.substring(0, 24),
-      description: "Enviar uma mensagem"
-    })
-  );
+  const rows =
+    resultado.rows.map(
+      (missionario) => ({
+
+        id:
+          `missionario_${missionario.id}`,
+
+        title:
+          missionario.nome
+            .substring(0, 24),
+
+        description:
+          "Enviar uma mensagem"
+
+      })
+    );
 
   const payload = {
-    messaging_product: "whatsapp",
-    recipient_type: "individual",
+
+    messaging_product:
+      "whatsapp",
+
+    recipient_type:
+      "individual",
+
     to: telefone,
-    type: "interactive",
+
+    type:
+      "interactive",
+
     interactive: {
-      type: "list",
+
+      type:
+        "list",
+
       body: {
-        text: "Para qual missionário você deseja enviar a mensagem?"
+
+        text:
+          "Para qual missionário você deseja enviar a mensagem?"
+
       },
+
       action: {
-        button: "Escolher missionário",
+
+        button:
+          "Escolher missionário",
+
         sections: [
           {
-            title: "Missionários",
+            title:
+              "Missionários",
+
             rows
           }
         ]
+
       }
+
     }
+
   };
 
   try {
 
-    const resposta = await fetch(
-      `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        method: "POST",
+    const resposta =
+      await fetch(
+        `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
+        {
 
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json"
-        },
+          method:
+            "POST",
 
-        body: JSON.stringify(payload)
-      }
-    );
+          headers: {
 
-    const dados = await resposta.json();
+            Authorization:
+              `Bearer ${WHATSAPP_TOKEN}`,
+
+            "Content-Type":
+              "application/json"
+
+          },
+
+          body:
+            JSON.stringify(payload)
+
+        }
+      );
+
+    const dados =
+      await resposta.json();
 
     if (!resposta.ok) {
+
       console.error(
         "Erro ao enviar menu:",
-        JSON.stringify(dados, null, 2)
+        JSON.stringify(
+          dados,
+          null,
+          2
+        )
       );
 
       await enviarMensagemWhatsApp(
@@ -851,6 +1075,10 @@ async function enviarMenuMissionarios(telefone) {
   }
 }
 
+// ======================================================
+// PROCESSAMENTO DA CONVERSA
+// ======================================================
+
 async function processarConversa(
   telefone,
   texto,
@@ -858,122 +1086,68 @@ async function processarConversa(
   missionarioSelecionadoId = null
 ) {
 
-  const textoNormalizado =
-    String(texto || "")
-      .trim()
-      .toLowerCase();
+  try {
 
-  let conversa =
-    await obterConversa(telefone);
-
-  if (
-    textoNormalizado === "inicio" ||
-    textoNormalizado === "início" ||
-    textoNormalizado === "menu"
-  ) {
-
-    await enviarMensagemWhatsApp(
-      telefone,
-      "Olá! 👋\n\nBem-vindo ao Mensagens Missionárias.\n\nVou ajudar você a enviar uma mensagem para um missionário."
+    console.log(
+      "===================================="
     );
 
-    await enviarMenuMissionarios(
+    console.log(
+      "PROCESSANDO CONVERSA"
+    );
+
+    console.log(
+      "Telefone:",
       telefone
     );
 
-    return;
-  }
-
-  if (!conversa) {
-
-    await salvarEtapa(
-      telefone,
-      "AGUARDANDO_MISSIONARIO"
+    console.log(
+      "Texto:",
+      texto
     );
 
-    await enviarMensagemWhatsApp(
-      telefone,
-      "Olá! 👋\n\nVamos enviar uma mensagem para um missionário."
+    console.log(
+      "ID WhatsApp:",
+      whatsappMessageId
     );
 
-    await enviarMenuMissionarios(
-      telefone
+    console.log(
+      "Missionário selecionado:",
+      missionarioSelecionadoId
     );
 
-    return;
-  }
+    console.log(
+      "===================================="
+    );
 
-  if (
-    conversa.etapa ===
-    "AGUARDANDO_MISSIONARIO"
-  ) {
+    const textoNormalizado =
+      String(texto || "")
+        .trim()
+        .toLowerCase();
 
-    let missionarioId =
-      missionarioSelecionadoId;
-
-    if (!missionarioId) {
-
-      const numero =
-        Number.parseInt(
-          textoNormalizado,
-          10
-        );
-
-      if (
-        Number.isInteger(numero) &&
-        numero > 0
-      ) {
-
-        const resultado =
-          await pool.query(
-            `
-            SELECT id
-            FROM missionarios
-            WHERE ativo = TRUE
-            ORDER BY nome ASC
-            `
-          );
-
-        if (
-          numero <=
-          resultado.rows.length
-        ) {
-          missionarioId =
-            resultado.rows[
-              numero - 1
-            ].id;
-        }
-      }
-    }
-
-    if (!missionarioId) {
-
-      await enviarMensagemWhatsApp(
-        telefone,
-        "Não consegui identificar o missionário.\n\nDigite MENU para escolher novamente."
+    let conversa =
+      await obterConversa(
+        telefone
       );
 
-      return;
-    }
+    console.log(
+      "Conversa encontrada:",
+      conversa
+    );
 
-    const missionario =
-      await pool.query(
-        `
-        SELECT id, nome
-        FROM missionarios
-        WHERE id = $1
-          AND ativo = TRUE
-        `,
-        [missionarioId]
-      );
+    // ==================================================
+    // MENU
+    // ==================================================
 
     if (
-      missionario.rows.length === 0
+      textoNormalizado === "inicio" ||
+      textoNormalizado === "início" ||
+      textoNormalizado === "menu"
     ) {
 
       await enviarMensagemWhatsApp(
         telefone,
-        "Esse missionário não está disponível."
+        "Olá! 👋\n\nBem-vindo ao Mensagens Missionárias.\n\nVou ajudar você a enviar uma mensagem para um missionário."
       );
 
       await enviarMenuMissionarios(
@@ -983,107 +1157,397 @@ async function processarConversa(
       return;
     }
 
-    await salvarEtapa(
-      telefone,
-      "AGUARDANDO_FAMILIA",
-      missionarioId
-    );
+    // ==================================================
+    // NOVA CONVERSA
+    // ==================================================
 
-    await enviarMensagemWhatsApp(
-      telefone,
-      `Você escolheu o missionário ${missionario.rows[0].nome}.\n\nAgora informe o nome da família que está enviando a mensagem.`
-    );
+    if (!conversa) {
 
-    return;
-  }
-
-  if (
-    conversa.etapa ===
-    "AGUARDANDO_FAMILIA"
-  ) {
-
-    if (!texto.trim()) {
+      await salvarEtapa(
+        telefone,
+        "AGUARDANDO_MISSIONARIO"
+      );
 
       await enviarMensagemWhatsApp(
         telefone,
-        "Por favor, informe o nome da família."
+        "Olá! 👋\n\nVamos enviar uma mensagem para um missionário."
+      );
+
+      await enviarMenuMissionarios(
+        telefone
       );
 
       return;
     }
 
-    await salvarEtapa(
-      telefone,
-      "AGUARDANDO_MENSAGEM",
-      conversa.missionario_id,
-      texto.trim()
-    );
+    // ==================================================
+    // ESCOLHA DO MISSIONÁRIO
+    // ==================================================
 
-    await enviarMensagemWhatsApp(
-      telefone,
-      "Agora escreva a mensagem que deseja enviar ao missionário."
-    );
+    if (
+      conversa.etapa ===
+      "AGUARDANDO_MISSIONARIO"
+    ) {
 
-    return;
-  }
+      let missionarioId =
+        missionarioSelecionadoId;
 
-  if (
-    conversa.etapa ===
-    "AGUARDANDO_MENSAGEM"
-  ) {
+      if (!missionarioId) {
 
-    if (!texto.trim()) {
+        const numero =
+          Number.parseInt(
+            textoNormalizado,
+            10
+          );
 
-      await enviarMensagemWhatsApp(
-        telefone,
-        "Por favor, escreva a mensagem."
-      );
+        if (
+          Number.isInteger(numero) &&
+          numero > 0
+        ) {
 
-      return;
-    }
+          const resultado =
+            await pool.query(`
+              SELECT
+                id
+              FROM missionarios
+              WHERE ativo = TRUE
+              ORDER BY nome ASC
+            `);
 
-    await pool.query(
-      `
-      INSERT INTO mensagens_missionarios
-        (
+          if (
+            numero <=
+            resultado.rows.length
+          ) {
+
+            missionarioId =
+              resultado.rows[
+                numero - 1
+              ].id;
+
+          }
+
+        }
+
+      }
+
+      if (!missionarioId) {
+
+        await enviarMensagemWhatsApp(
           telefone,
-          missionario_id,
-          nome_familia,
-          mensagem,
-          status
-        )
-      VALUES
-        ($1, $2, $3, $4, 'PENDENTE')
-      `,
-      [
+          "Não consegui identificar o missionário.\n\nDigite MENU para escolher novamente."
+        );
+
+        return;
+      }
+
+      const missionario =
+        await pool.query(
+          `
+          SELECT
+            id,
+            nome
+          FROM missionarios
+          WHERE id = $1
+            AND ativo = TRUE
+          `,
+          [missionarioId]
+        );
+
+      if (
+        missionario.rows.length === 0
+      ) {
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Esse missionário não está disponível."
+        );
+
+        await enviarMenuMissionarios(
+          telefone
+        );
+
+        return;
+      }
+
+      await salvarEtapa(
         telefone,
+        "AGUARDANDO_FAMILIA",
+        missionarioId,
+        null
+      );
+
+      console.log(
+        "Missionário selecionado:",
+        missionario.rows[0].nome
+      );
+
+      await enviarMensagemWhatsApp(
+        telefone,
+        `Você escolheu o missionário ${missionario.rows[0].nome}.\n\nAgora informe o nome da família que está enviando a mensagem.`
+      );
+
+      return;
+    }
+
+    // ==================================================
+    // NOME DA FAMÍLIA
+    // ==================================================
+
+    if (
+      conversa.etapa ===
+      "AGUARDANDO_FAMILIA"
+    ) {
+
+      const nomeFamilia =
+        String(texto || "")
+          .trim();
+
+      if (!nomeFamilia) {
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Por favor, informe o nome da família."
+        );
+
+        return;
+      }
+
+      if (
+        !conversa.missionario_id
+      ) {
+
+        console.error(
+          "ERRO: conversa sem missionario_id"
+        );
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Ocorreu um problema com a escolha do missionário. Digite MENU para começar novamente."
+        );
+
+        return;
+      }
+
+      await salvarEtapa(
+        telefone,
+        "AGUARDANDO_MENSAGEM",
         conversa.missionario_id,
-        conversa.nome_familia,
-        texto.trim()
-      ]
+        nomeFamilia
+      );
+
+      console.log(
+        "Nome da família salvo:",
+        nomeFamilia
+      );
+
+      await enviarMensagemWhatsApp(
+        telefone,
+        "Agora escreva a mensagem que deseja enviar ao missionário."
+      );
+
+      return;
+    }
+
+    // ==================================================
+    // MENSAGEM FINAL
+    // ==================================================
+
+    if (
+      conversa.etapa ===
+      "AGUARDANDO_MENSAGEM"
+    ) {
+
+      const mensagemFinal =
+        String(texto || "")
+          .trim();
+
+      console.log(
+        "Recebendo mensagem final:",
+        mensagemFinal
+      );
+
+      if (!mensagemFinal) {
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Por favor, escreva a mensagem."
+        );
+
+        return;
+      }
+
+      if (
+        !conversa.missionario_id
+      ) {
+
+        console.error(
+          "ERRO: missionario_id não encontrado na conversa."
+        );
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Ocorreu um problema com o missionário selecionado. Digite MENU para começar novamente."
+        );
+
+        return;
+      }
+
+      if (
+        !conversa.nome_familia
+      ) {
+
+        console.error(
+          "ERRO: nome_familia não encontrado na conversa."
+        );
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Ocorreu um problema com o nome da família. Digite MENU para começar novamente."
+        );
+
+        return;
+      }
+
+      console.log(
+        "Gravando mensagem no banco..."
+      );
+
+      // ================================================
+      // GRAVAR MENSAGEM
+      // ================================================
+
+      const resultado =
+        await pool.query(
+          `
+          INSERT INTO mensagens_missionarios
+          (
+            telefone,
+            missionario_id,
+            nome_familia,
+            mensagem,
+            status
+          )
+          VALUES
+          (
+            $1,
+            $2,
+            $3,
+            $4,
+            'PENDENTE'
+          )
+          RETURNING id
+          `,
+          [
+            telefone,
+            conversa.missionario_id,
+            conversa.nome_familia,
+            mensagemFinal
+          ]
+        );
+
+      console.log(
+        "Mensagem gravada com sucesso. ID:",
+        resultado.rows[0]?.id
+      );
+
+      // ================================================
+      // REINICIAR CONVERSA
+      // ================================================
+
+      await salvarEtapa(
+        telefone,
+        "INICIO",
+        null,
+        null
+      );
+
+      console.log(
+        "Conversa reiniciada."
+      );
+
+      // ================================================
+      // CONFIRMAÇÃO
+      // ================================================
+
+      const enviouConfirmacao =
+        await enviarMensagemWhatsApp(
+          telefone,
+          "✅ Sua mensagem foi recebida com sucesso!\n\nObrigado por enviar uma mensagem ao missionário. ❤️"
+        );
+
+      console.log(
+        "Confirmação enviada:",
+        enviouConfirmacao
+      );
+
+      return;
+    }
+
+    // ==================================================
+    // ETAPA DESCONHECIDA
+    // ==================================================
+
+    console.log(
+      "Etapa desconhecida:",
+      conversa.etapa
     );
 
     await salvarEtapa(
       telefone,
-      "INICIO"
+      "AGUARDANDO_MISSIONARIO",
+      null,
+      null
     );
 
     await enviarMensagemWhatsApp(
       telefone,
-      "✅ Sua mensagem foi recebida com sucesso!\n\nObrigado por enviar uma mensagem ao missionário. ❤️"
+      "Vamos começar novamente. Escolha o missionário."
     );
 
-    return;
+    await enviarMenuMissionarios(
+      telefone
+    );
+
+  } catch (error) {
+
+    console.error(
+      "===================================="
+    );
+
+    console.error(
+      "ERRO AO PROCESSAR CONVERSA"
+    );
+
+    console.error(
+      "Mensagem:",
+      error?.message
+    );
+
+    console.error(
+      "Stack:",
+      error?.stack
+    );
+
+    console.error(
+      "===================================="
+    );
+
+    try {
+
+      await enviarMensagemWhatsApp(
+        telefone,
+        "⚠️ Ocorreu um problema ao registrar sua mensagem. Por favor, tente novamente ou digite MENU para começar novamente."
+      );
+
+    } catch (erroWhatsApp) {
+
+      console.error(
+        "Também ocorreu erro ao enviar mensagem de erro para o WhatsApp:",
+        erroWhatsApp
+      );
+
+    }
   }
-
-  await salvarEtapa(
-    telefone,
-    "AGUARDANDO_MISSIONARIO"
-  );
-
-  await enviarMenuMissionarios(
-    telefone
-  );
 }
 
 // ======================================================
@@ -1093,9 +1557,11 @@ async function processarConversa(
 async function enviarCompilacoesPendentes() {
 
   if (!resend) {
+
     throw new Error(
       "RESEND_API_KEY não configurada."
     );
+
   }
 
   const resultado =
@@ -1109,10 +1575,14 @@ async function enviarCompilacoesPendentes() {
         m.id AS missionario_id,
         m.nome AS missionario_nome,
         m.email AS missionario_email
+
       FROM mensagens_missionarios mm
+
       INNER JOIN missionarios m
         ON m.id = mm.missionario_id
+
       WHERE mm.status = 'PENDENTE'
+
       ORDER BY
         m.nome ASC,
         mm.criado_em ASC
@@ -1121,7 +1591,9 @@ async function enviarCompilacoesPendentes() {
   const mensagens =
     resultado.rows;
 
-  if (mensagens.length === 0) {
+  if (
+    mensagens.length === 0
+  ) {
 
     return {
       missionarios: 0,
@@ -1134,9 +1606,16 @@ async function enviarCompilacoesPendentes() {
   const grupos =
     new Map();
 
-  for (const mensagem of mensagens) {
+  for (
+    const mensagem
+    of mensagens
+  ) {
 
-    if (!grupos.has(mensagem.missionario_id)) {
+    if (
+      !grupos.has(
+        mensagem.missionario_id
+      )
+    ) {
 
       grupos.set(
         mensagem.missionario_id,
@@ -1153,10 +1632,13 @@ async function enviarCompilacoesPendentes() {
           mensagens: []
         }
       );
+
     }
 
     grupos
-      .get(mensagem.missionario_id)
+      .get(
+        mensagem.missionario_id
+      )
       .mensagens
       .push(mensagem);
   }
@@ -1166,7 +1648,10 @@ async function enviarCompilacoesPendentes() {
   let semEmail = 0;
   let erros = 0;
 
-  for (const grupo of grupos.values()) {
+  for (
+    const grupo
+    of grupos.values()
+  ) {
 
     if (!grupo.email) {
 
@@ -1189,12 +1674,19 @@ async function enviarCompilacoesPendentes() {
             >
 
               <p>
-                <strong>Família:</strong>
-                ${escaparHTML(item.nome_familia)}
+                <strong>
+                  Família:
+                </strong>
+
+                ${escaparHTML(
+                  item.nome_familia
+                )}
               </p>
 
               <p>
-                ${escaparHTML(item.mensagem)}
+                ${escaparHTML(
+                  item.mensagem
+                )}
               </p>
 
               <p
@@ -1203,14 +1695,19 @@ async function enviarCompilacoesPendentes() {
                   font-size:12px;
                 "
               >
+
                 Recebida em:
-                ${new Date(item.criado_em).toLocaleString(
+
+                ${new Date(
+                  item.criado_em
+                ).toLocaleString(
                   "pt-BR",
                   {
                     timeZone:
                       TIMEZONE
                   }
                 )}
+
               </p>
 
             </div>
@@ -1222,15 +1719,19 @@ async function enviarCompilacoesPendentes() {
 
       const resposta =
         await resend.emails.send({
+
           from:
             "Mensagens Missionárias <mensagens@mail.familycode.com.br>",
 
-          to: [grupo.email],
+          to: [
+            grupo.email
+          ],
 
           subject:
             `Mensagens Missionárias - ${grupo.nome}`,
 
           html: `
+
             <div
               style="
                 font-family:Arial,sans-serif;
@@ -1244,7 +1745,10 @@ async function enviarCompilacoesPendentes() {
               </h1>
 
               <p>
-                Olá, ${escaparHTML(grupo.nome)}!
+                Olá,
+                ${escaparHTML(
+                  grupo.nome
+                )}!
               </p>
 
               <p>
@@ -1270,6 +1774,7 @@ async function enviarCompilacoesPendentes() {
               </p>
 
             </div>
+
           `
         });
 
@@ -1281,6 +1786,7 @@ async function enviarCompilacoesPendentes() {
         );
 
         erros++;
+
         continue;
       }
 
@@ -1301,6 +1807,7 @@ async function enviarCompilacoesPendentes() {
       );
 
       totalMissionarios++;
+
       totalMensagens +=
         grupo.mensagens.length;
 
@@ -1332,121 +1839,141 @@ async function enviarCompilacoesPendentes() {
 // PÁGINA INICIAL
 // ======================================================
 
-app.get("/", (req, res) => {
+app.get(
+  "/",
+  (req, res) => {
 
-  res.setHeader(
-    "Cache-Control",
-    "no-store"
-  );
+    res.setHeader(
+      "Cache-Control",
+      "no-store"
+    );
 
-  res.send(
-    paginaHTML(
-      `
-      <div class="card home">
+    res.send(
+      paginaHTML(
+        `
+        <div class="card home">
 
-        <h1>
-          Mensagens Missionárias
-        </h1>
+          <h1>
+            Mensagens Missionárias
+          </h1>
 
-        <p>
-          Servidor online e funcionando corretamente.
-        </p>
+          <p>
+            Servidor online e funcionando corretamente.
+          </p>
 
-        <p>
-          O sistema está preparado para receber
-          mensagens pelo WhatsApp.
-        </p>
+          <p>
+            O sistema está preparado para receber
+            mensagens pelo WhatsApp.
+          </p>
 
-        <a
-          class="botao"
-          href="/admin"
-        >
-          🔐 Entrar no painel administrativo
-        </a>
+          <a
+            class="botao"
+            href="/admin"
+          >
+            🔐 Entrar no painel administrativo
+          </a>
 
-      </div>
-      `,
-      "Mensagens Missionárias"
-    )
-  );
-});
+        </div>
+        `,
+        "Mensagens Missionárias"
+      )
+    );
+  }
+);
 
 // ======================================================
 // LOGIN
 // ======================================================
 
-app.get("/admin/login", (req, res) => {
+app.get(
+  "/admin/login",
+  (req, res) => {
 
-  res.setHeader(
-    "Cache-Control",
-    "no-store"
-  );
+    res.setHeader(
+      "Cache-Control",
+      "no-store"
+    );
 
-  if (usuarioEstaAutenticado(req)) {
-    return res.redirect(
+    if (
+      usuarioEstaAutenticado(req)
+    ) {
+
+      return res.redirect(
+        "/admin"
+      );
+    }
+
+    res.status(200).send(
+      paginaLogin()
+    );
+  }
+);
+
+app.post(
+  "/admin/login",
+  (req, res) => {
+
+    const senha =
+      String(
+        req.body?.senha || ""
+      );
+
+    if (
+      !ADMIN_PASSWORD
+    ) {
+
+      return res.status(500).send(
+        paginaHTML(
+          `
+          <div class="card">
+
+            <h2>
+              Erro de configuração
+            </h2>
+
+            <div class="erro">
+              ADMIN_PASSWORD não está configurada.
+            </div>
+
+          </div>
+          `
+        )
+      );
+    }
+
+    if (
+      senha !==
+      ADMIN_PASSWORD
+    ) {
+
+      return res.status(401).send(
+        paginaLogin(
+          "Senha incorreta."
+        )
+      );
+    }
+
+    enviarCookieLogin(res);
+
+    res.redirect(
+      303,
       "/admin"
     );
   }
+);
 
-  res.status(200).send(
-    paginaLogin()
-  );
-});
+app.post(
+  "/admin/logout",
+  (req, res) => {
 
-app.post("/admin/login", (req, res) => {
+    apagarCookieLogin(res);
 
-  const senha =
-    String(
-      req.body?.senha || ""
-    );
-
-  if (
-    !ADMIN_PASSWORD
-  ) {
-
-    return res.status(500).send(
-      paginaHTML(
-        `
-        <div class="card">
-          <h2>Erro de configuração</h2>
-
-          <div class="erro">
-            ADMIN_PASSWORD não está configurada.
-          </div>
-        </div>
-        `
-      )
+    res.redirect(
+      303,
+      "/admin/login"
     );
   }
-
-  if (
-    senha !== ADMIN_PASSWORD
-  ) {
-
-    return res.status(401).send(
-      paginaLogin(
-        "Senha incorreta."
-      )
-    );
-  }
-
-  enviarCookieLogin(res);
-
-  res.redirect(
-    303,
-    "/admin"
-  );
-});
-
-app.post("/admin/logout", (req, res) => {
-
-  apagarCookieLogin(res);
-
-  res.redirect(
-    303,
-    "/admin/login"
-  );
-});
+);
 
 // ======================================================
 // PAINEL ADMINISTRATIVO
@@ -1493,21 +2020,28 @@ app.get(
             mm.criado_em,
             mm.enviado_em,
             m.nome AS missionario_nome
+
           FROM mensagens_missionarios mm
+
           LEFT JOIN missionarios m
             ON m.id = mm.missionario_id
-          ORDER BY mm.criado_em DESC
+
+          ORDER BY
+            mm.criado_em DESC
+
           LIMIT 200
         `),
 
         pool.query(`
-          SELECT COUNT(*) AS total
+          SELECT
+            COUNT(*) AS total
           FROM mensagens_missionarios
           WHERE status = 'PENDENTE'
         `),
 
         pool.query(`
-          SELECT COUNT(*) AS total
+          SELECT
+            COUNT(*) AS total
           FROM mensagens_missionarios
           WHERE status = 'ENVIADA'
         `)
@@ -1522,12 +2056,14 @@ app.get(
 
       const pendentes =
         Number(
-          pendentesResult.rows[0]?.total || 0
+          pendentesResult.rows[0]?.total ||
+          0
         );
 
       const enviadas =
         Number(
-          enviadasResult.rows[0]?.total || 0
+          enviadasResult.rows[0]?.total ||
+          0
         );
 
       console.log(
@@ -1539,6 +2075,7 @@ app.get(
         <div class="cabecalho-painel">
 
           <div>
+
             <h2>
               📊 Painel administrativo
             </h2>
@@ -1546,18 +2083,21 @@ app.get(
             <p>
               Gerenciamento das Mensagens Missionárias.
             </p>
+
           </div>
 
           <form
             method="POST"
             action="/admin/logout"
           >
+
             <button
               class="botao-vermelho"
               type="submit"
             >
               Sair
             </button>
+
           </form>
 
         </div>
@@ -1565,31 +2105,51 @@ app.get(
         <div class="estatisticas">
 
           <div class="estatistica">
-            <span>Missionários</span>
+
+            <span>
+              Missionários
+            </span>
+
             <strong>
               ${missionarios.length}
             </strong>
+
           </div>
 
           <div class="estatistica">
-            <span>Mensagens pendentes</span>
+
+            <span>
+              Mensagens pendentes
+            </span>
+
             <strong class="pendente">
               ${pendentes}
             </strong>
+
           </div>
 
           <div class="estatistica">
-            <span>Mensagens enviadas</span>
+
+            <span>
+              Mensagens enviadas
+            </span>
+
             <strong class="enviada">
               ${enviadas}
             </strong>
+
           </div>
 
           <div class="estatistica">
-            <span>Total de mensagens</span>
+
+            <span>
+              Total de mensagens
+            </span>
+
             <strong>
               ${mensagens.length}
             </strong>
+
           </div>
 
         </div>
@@ -1609,24 +2169,28 @@ app.get(
             method="POST"
             action="/admin/enviar-compilacao"
           >
+
             <button
               class="botao-verde"
               type="submit"
             >
               📤 Enviar compilação
             </button>
+
           </form>
 
           <form
             method="POST"
             action="/admin/testar-email"
           >
+
             <button
               class="botao-amarelo"
               type="submit"
             >
               ✉️ Testar envio de e-mail
             </button>
+
           </form>
 
         </div>
@@ -1685,12 +2249,27 @@ app.get(
             <table>
 
               <thead>
+
                 <tr>
-                  <th>Nome</th>
-                  <th>E-mail</th>
-                  <th>Status</th>
-                  <th>Ações</th>
+
+                  <th>
+                    Nome
+                  </th>
+
+                  <th>
+                    E-mail
+                  </th>
+
+                  <th>
+                    Status
+                  </th>
+
+                  <th>
+                    Ações
+                  </th>
+
                 </tr>
+
               </thead>
 
               <tbody>
@@ -1702,12 +2281,14 @@ app.get(
 
         html += `
           <tr>
+
             <td
               colspan="4"
               class="centralizado"
             >
               Nenhum missionário cadastrado.
             </td>
+
           </tr>
         `;
 
@@ -1719,6 +2300,7 @@ app.get(
         ) {
 
           html += `
+
             <tr>
 
               <td>
@@ -1737,8 +2319,16 @@ app.get(
 
                 ${
                   missionario.ativo
-                    ? `<span class="ativo">ATIVO</span>`
-                    : `<span class="inativo">INATIVO</span>`
+                    ? `
+                      <span class="ativo">
+                        ATIVO
+                      </span>
+                    `
+                    : `
+                      <span class="inativo">
+                        INATIVO
+                      </span>
+                    `
                 }
 
               </td>
@@ -1767,11 +2357,13 @@ app.get(
                       }"
                       type="submit"
                     >
+
                       ${
                         missionario.ativo
                           ? "Desativar"
                           : "Ativar"
                       }
+
                     </button>
 
                   </form>
@@ -1781,11 +2373,14 @@ app.get(
               </td>
 
             </tr>
+
           `;
         }
+
       }
 
       html += `
+
               </tbody>
 
             </table>
@@ -1807,11 +2402,27 @@ app.get(
               <thead>
 
                 <tr>
-                  <th>Data</th>
-                  <th>Missionário</th>
-                  <th>Família</th>
-                  <th>Mensagem</th>
-                  <th>Status</th>
+
+                  <th>
+                    Data
+                  </th>
+
+                  <th>
+                    Missionário
+                  </th>
+
+                  <th>
+                    Família
+                  </th>
+
+                  <th>
+                    Mensagem
+                  </th>
+
+                  <th>
+                    Status
+                  </th>
+
                 </tr>
 
               </thead>
@@ -1824,14 +2435,18 @@ app.get(
       ) {
 
         html += `
+
           <tr>
+
             <td
               colspan="5"
               class="centralizado"
             >
               Nenhuma mensagem recebida.
             </td>
+
           </tr>
+
         `;
 
       } else {
@@ -1842,9 +2457,11 @@ app.get(
         ) {
 
           html += `
+
             <tr>
 
               <td>
+
                 ${new Date(
                   mensagem.criado_em
                 ).toLocaleString(
@@ -1854,44 +2471,62 @@ app.get(
                       TIMEZONE
                   }
                 )}
+
               </td>
 
               <td>
+
                 ${escaparHTML(
                   mensagem.missionario_nome ||
                   "Não informado"
                 )}
+
               </td>
 
               <td>
+
                 ${escaparHTML(
                   mensagem.nome_familia ||
                   ""
                 )}
+
               </td>
 
               <td>
+
                 ${escaparHTML(
                   mensagem.mensagem
                 )}
+
               </td>
 
               <td>
 
                 ${
                   mensagem.status === "ENVIADA"
-                    ? `<span class="enviada">ENVIADA</span>`
-                    : `<span class="pendente">PENDENTE</span>`
+                    ? `
+                      <span class="enviada">
+                        ENVIADA
+                      </span>
+                    `
+                    : `
+                      <span class="pendente">
+                        PENDENTE
+                      </span>
+                    `
                 }
 
               </td>
 
             </tr>
+
           `;
         }
+
       }
 
       html += `
+
               </tbody>
 
             </table>
@@ -1899,14 +2534,17 @@ app.get(
           </div>
 
         </div>
+
       `;
 
-      res.status(200).send(
-        paginaHTML(
-          html,
-          "Painel - Mensagens Missionárias"
-        )
-      );
+      res
+        .status(200)
+        .send(
+          paginaHTML(
+            html,
+            "Painel - Mensagens Missionárias"
+          )
+        );
 
     } catch (error) {
 
@@ -1915,57 +2553,61 @@ app.get(
         error
       );
 
-      res.status(500).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(500)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ❌ Erro ao carregar o painel
-            </h2>
+            <div class="card">
 
-            <div class="erro">
+              <h2>
+                ❌ Erro ao carregar o painel
+              </h2>
 
-              <strong>
-                O servidor respondeu, mas ocorreu
-                um erro ao consultar o banco de dados.
-              </strong>
+              <div class="erro">
+
+                <strong>
+                  O servidor respondeu, mas ocorreu
+                  um erro ao consultar o banco de dados.
+                </strong>
+
+              </div>
+
+              <p>
+                Detalhes técnicos:
+              </p>
+
+              <pre
+                style="
+                  white-space:pre-wrap;
+                  background:#f3f4f6;
+                  padding:15px;
+                  border-radius:8px;
+                  overflow:auto;
+                "
+              >${escaparHTML(
+                error?.message ||
+                String(error)
+              )}</pre>
+
+              <p>
+                Verifique também os logs do Render.
+              </p>
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Tentar novamente
+              </a>
 
             </div>
 
-            <p>
-              Detalhes técnicos:
-            </p>
-
-            <pre
-              style="
-                white-space:pre-wrap;
-                background:#f3f4f6;
-                padding:15px;
-                border-radius:8px;
-                overflow:auto;
-              "
-            >${escaparHTML(
-              error?.message ||
-              String(error)
-            )}</pre>
-
-            <p>
-              Verifique também os logs do Render.
-            </p>
-
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Tentar novamente
-            </a>
-
-          </div>
-          `,
-          "Erro - Painel"
-        )
-      );
+            `,
+            "Erro - Painel"
+          )
+        );
     }
   }
 );
@@ -1984,62 +2626,76 @@ app.post(
       const resultado =
         await enviarCompilacoesPendentes();
 
-      res.status(200).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(200)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ✅ Compilação concluída!
-            </h2>
+            <div class="card">
 
-            <div class="sucesso">
+              <h2>
+                ✅ Compilação concluída!
+              </h2>
 
-              <strong>
-                ${resultado.mensagens}
-                mensagem(ns) enviada(s)
-                para
-                ${resultado.missionarios}
-                missionário(s).
-              </strong>
+              <div class="sucesso">
+
+                <strong>
+
+                  ${resultado.mensagens}
+                  mensagem(ns) enviada(s)
+                  para
+                  ${resultado.missionarios}
+                  missionário(s).
+
+                </strong>
+
+              </div>
+
+              ${
+                resultado.semEmail > 0
+                  ? `
+
+                    <div class="aviso">
+
+                      ${resultado.semEmail}
+                      missionário(s) sem e-mail cadastrado.
+
+                    </div>
+
+                  `
+                  : ""
+              }
+
+              ${
+                resultado.erros > 0
+                  ? `
+
+                    <div class="erro">
+
+                      Ocorreram
+                      ${resultado.erros}
+                      erro(s) durante o envio.
+
+                    </div>
+
+                  `
+                  : ""
+              }
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Voltar ao painel
+              </a>
 
             </div>
 
-            ${
-              resultado.semEmail > 0
-                ? `
-                  <div class="aviso">
-                    ${resultado.semEmail}
-                    missionário(s) sem e-mail cadastrado.
-                  </div>
-                `
-                : ""
-            }
-
-            ${
-              resultado.erros > 0
-                ? `
-                  <div class="erro">
-                    Ocorreram
-                    ${resultado.erros}
-                    erro(s) durante o envio.
-                  </div>
-                `
-                : ""
-            }
-
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Voltar ao painel
-            </a>
-
-          </div>
-          `,
-          "Compilação concluída"
-        )
-      );
+            `,
+            "Compilação concluída"
+          )
+        );
 
     } catch (error) {
 
@@ -2048,34 +2704,40 @@ app.post(
         error
       );
 
-      res.status(500).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(500)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ❌ Erro ao enviar compilação
-            </h2>
+            <div class="card">
 
-            <div class="erro">
-              ${escaparHTML(
-                error?.message ||
-                String(error)
-              )}
+              <h2>
+                ❌ Erro ao enviar compilação
+              </h2>
+
+              <div class="erro">
+
+                ${escaparHTML(
+                  error?.message ||
+                  String(error)
+                )}
+
+              </div>
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Voltar ao painel
+              </a>
+
             </div>
 
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Voltar ao painel
-            </a>
-
-          </div>
-          `,
-          "Erro"
-        )
-      );
+            `,
+            "Erro"
+          )
+        );
     }
   }
 );
@@ -2092,9 +2754,11 @@ app.post(
     try {
 
       if (!resend) {
+
         throw new Error(
           "RESEND_API_KEY não configurada."
         );
+
       }
 
       const emailTeste =
@@ -2103,15 +2767,19 @@ app.post(
 
       const resposta =
         await resend.emails.send({
+
           from:
             "Mensagens Missionárias <mensagens@mail.familycode.com.br>",
 
-          to: [emailTeste],
+          to: [
+            emailTeste
+          ],
 
           subject:
             "Teste - Mensagens Missionárias",
 
           html: `
+
             <div
               style="
                 font-family:Arial,sans-serif;
@@ -2132,43 +2800,53 @@ app.post(
               </p>
 
             </div>
+
           `
         });
 
       if (resposta.error) {
+
         throw new Error(
           resposta.error.message ||
           JSON.stringify(
             resposta.error
           )
         );
+
       }
 
-      res.status(200).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(200)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ✅ E-mail de teste enviado!
-            </h2>
+            <div class="card">
 
-            <div class="sucesso">
-              O e-mail de teste foi enviado com sucesso.
+              <h2>
+                ✅ E-mail de teste enviado!
+              </h2>
+
+              <div class="sucesso">
+
+                O e-mail de teste foi enviado
+                com sucesso.
+
+              </div>
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Voltar ao painel
+              </a>
+
             </div>
 
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Voltar ao painel
-            </a>
-
-          </div>
-          `,
-          "Teste de e-mail"
-        )
-      );
+            `,
+            "Teste de e-mail"
+          )
+        );
 
     } catch (error) {
 
@@ -2177,34 +2855,40 @@ app.post(
         error
       );
 
-      res.status(500).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(500)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ❌ Erro no teste de e-mail
-            </h2>
+            <div class="card">
 
-            <div class="erro">
-              ${escaparHTML(
-                error?.message ||
-                String(error)
-              )}
+              <h2>
+                ❌ Erro no teste de e-mail
+              </h2>
+
+              <div class="erro">
+
+                ${escaparHTML(
+                  error?.message ||
+                  String(error)
+                )}
+
+              </div>
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Voltar ao painel
+              </a>
+
             </div>
 
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Voltar ao painel
-            </a>
-
-          </div>
-          `,
-          "Erro"
-        )
-      );
+            `,
+            "Erro"
+          )
+        );
     }
   }
 );
@@ -2231,23 +2915,32 @@ app.post(
         ).trim();
 
       if (!nome || !email) {
+
         throw new Error(
           "Nome e e-mail são obrigatórios."
         );
+
       }
 
       await pool.query(
         `
         INSERT INTO missionarios
-          (
-            nome,
-            email,
-            ativo
-          )
+        (
+          nome,
+          email,
+          ativo
+        )
         VALUES
-          ($1, $2, TRUE)
+        (
+          $1,
+          $2,
+          TRUE
+        )
         `,
-        [nome, email]
+        [
+          nome,
+          email
+        ]
       );
 
       res.redirect(
@@ -2262,33 +2955,39 @@ app.post(
         error
       );
 
-      res.status(500).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(500)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ❌ Erro ao cadastrar missionário
-            </h2>
+            <div class="card">
 
-            <div class="erro">
-              ${escaparHTML(
-                error?.message ||
-                String(error)
-              )}
+              <h2>
+                ❌ Erro ao cadastrar missionário
+              </h2>
+
+              <div class="erro">
+
+                ${escaparHTML(
+                  error?.message ||
+                  String(error)
+                )}
+
+              </div>
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Voltar ao painel
+              </a>
+
             </div>
 
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Voltar ao painel
-            </a>
-
-          </div>
-          `
-        )
-      );
+            `
+          )
+        );
     }
   }
 );
@@ -2310,10 +3009,14 @@ app.get(
           10
         );
 
-      if (!Number.isInteger(id)) {
+      if (
+        !Number.isInteger(id)
+      ) {
+
         throw new Error(
           "ID inválido."
         );
+
       }
 
       const resultado =
@@ -2334,26 +3037,30 @@ app.get(
         resultado.rows.length === 0
       ) {
 
-        return res.status(404).send(
-          paginaHTML(
-            `
-            <div class="card">
+        return res
+          .status(404)
+          .send(
+            paginaHTML(
+              `
 
-              <h2>
-                Missionário não encontrado
-              </h2>
+              <div class="card">
 
-              <a
-                href="/admin"
-                class="botao"
-              >
-                Voltar
-              </a>
+                <h2>
+                  Missionário não encontrado
+                </h2>
 
-            </div>
-            `
-          )
-        );
+                <a
+                  href="/admin"
+                  class="botao"
+                >
+                  Voltar
+                </a>
+
+              </div>
+
+              `
+            )
+          );
       }
 
       const missionario =
@@ -2362,6 +3069,7 @@ app.get(
       res.send(
         paginaHTML(
           `
+
           <div class="card">
 
             <h2>
@@ -2417,6 +3125,7 @@ app.get(
             </form>
 
           </div>
+
           `,
           "Editar missionário"
         )
@@ -2429,33 +3138,39 @@ app.get(
         error
       );
 
-      res.status(500).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(500)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ❌ Erro
-            </h2>
+            <div class="card">
 
-            <div class="erro">
-              ${escaparHTML(
-                error?.message ||
-                String(error)
-              )}
+              <h2>
+                ❌ Erro
+              </h2>
+
+              <div class="erro">
+
+                ${escaparHTML(
+                  error?.message ||
+                  String(error)
+                )}
+
+              </div>
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Voltar
+              </a>
+
             </div>
 
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Voltar
-            </a>
-
-          </div>
-          `
-        )
-      );
+            `
+          )
+        );
     }
   }
 );
@@ -2483,16 +3198,25 @@ app.post(
           req.body?.email || ""
         ).trim();
 
-      if (!Number.isInteger(id)) {
+      if (
+        !Number.isInteger(id)
+      ) {
+
         throw new Error(
           "ID inválido."
         );
+
       }
 
-      if (!nome || !email) {
+      if (
+        !nome ||
+        !email
+      ) {
+
         throw new Error(
           "Nome e e-mail são obrigatórios."
         );
+
       }
 
       await pool.query(
@@ -2522,33 +3246,39 @@ app.post(
         error
       );
 
-      res.status(500).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(500)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ❌ Erro ao editar missionário
-            </h2>
+            <div class="card">
 
-            <div class="erro">
-              ${escaparHTML(
-                error?.message ||
-                String(error)
-              )}
+              <h2>
+                ❌ Erro ao editar missionário
+              </h2>
+
+              <div class="erro">
+
+                ${escaparHTML(
+                  error?.message ||
+                  String(error)
+                )}
+
+              </div>
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Voltar ao painel
+              </a>
+
             </div>
 
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Voltar ao painel
-            </a>
-
-          </div>
-          `
-        )
-      );
+            `
+          )
+        );
     }
   }
 );
@@ -2570,10 +3300,14 @@ app.post(
           10
         );
 
-      if (!Number.isInteger(id)) {
+      if (
+        !Number.isInteger(id)
+      ) {
+
         throw new Error(
           "ID inválido."
         );
+
       }
 
       await pool.query(
@@ -2597,33 +3331,39 @@ app.post(
         error
       );
 
-      res.status(500).send(
-        paginaHTML(
-          `
-          <div class="card">
+      res
+        .status(500)
+        .send(
+          paginaHTML(
+            `
 
-            <h2>
-              ❌ Erro
-            </h2>
+            <div class="card">
 
-            <div class="erro">
-              ${escaparHTML(
-                error?.message ||
-                String(error)
-              )}
+              <h2>
+                ❌ Erro
+              </h2>
+
+              <div class="erro">
+
+                ${escaparHTML(
+                  error?.message ||
+                  String(error)
+                )}
+
+              </div>
+
+              <a
+                href="/admin"
+                class="botao"
+              >
+                Voltar
+              </a>
+
             </div>
 
-            <a
-              href="/admin"
-              class="botao"
-            >
-              Voltar
-            </a>
-
-          </div>
-          `
-        )
-      );
+            `
+          )
+        );
     }
   }
 );
@@ -2673,9 +3413,30 @@ app.post(
   "/webhook",
   async (req, res) => {
 
+    // Responde imediatamente para a Meta
     res.sendStatus(200);
 
     try {
+
+      console.log(
+        "===================================="
+      );
+
+      console.log(
+        "WEBHOOK WHATSAPP RECEBIDO"
+      );
+
+      console.log(
+        JSON.stringify(
+          req.body,
+          null,
+          2
+        )
+      );
+
+      console.log(
+        "===================================="
+      );
 
       const value =
         req.body?.entry?.[0]
@@ -2686,6 +3447,11 @@ app.post(
         value?.messages?.[0];
 
       if (!message) {
+
+        console.log(
+          "Webhook sem mensagem."
+        );
+
         return;
       }
 
@@ -2700,6 +3466,10 @@ app.post(
       let missionarioSelecionadoId =
         null;
 
+      // ==============================================
+      // MENSAGEM DE TEXTO
+      // ==============================================
+
       if (
         message.type === "text"
       ) {
@@ -2707,9 +3477,23 @@ app.post(
         texto =
           message.text?.body || "";
 
-      } else if (
+        console.log(
+          "Tipo da mensagem: TEXTO"
+        );
+
+      }
+
+      // ==============================================
+      // MENSAGEM INTERATIVA
+      // ==============================================
+
+      else if (
         message.type === "interactive"
       ) {
+
+        console.log(
+          "Tipo da mensagem: INTERACTIVE"
+        );
 
         const interactive =
           message.interactive;
@@ -2720,8 +3504,24 @@ app.post(
         ) {
 
           const id =
-            interactive.list_reply?.id ||
-            "";
+            interactive
+              .list_reply
+              ?.id || "";
+
+          const titulo =
+            interactive
+              .list_reply
+              ?.title || "";
+
+          console.log(
+            "ID selecionado:",
+            id
+          );
+
+          console.log(
+            "Título selecionado:",
+            titulo
+          );
 
           if (
             id.startsWith(
@@ -2737,37 +3537,100 @@ app.post(
                 ),
                 10
               );
+
+            console.log(
+              "Missionário selecionado:",
+              missionarioSelecionadoId
+            );
           }
 
           texto =
-            interactive.list_reply?.title ||
-            "";
+            titulo;
 
         } else {
 
           texto =
-            interactive?.button_reply?.title ||
-            "";
+            interactive
+              ?.button_reply
+              ?.title || "";
+
         }
+
       }
 
-      await pool.query(
-        `
-        INSERT INTO mensagens
+      // ==============================================
+      // OUTRO TIPO
+      // ==============================================
+
+      else {
+
+        console.log(
+          "Tipo de mensagem não tratado:",
+          message.type
+        );
+
+        return;
+      }
+
+      console.log(
+        "Telefone:",
+        telefone
+      );
+
+      console.log(
+        "Texto recebido:",
+        texto
+      );
+
+      console.log(
+        "Missionário:",
+        missionarioSelecionadoId
+      );
+
+      // ==============================================
+      // SALVAR HISTÓRICO DA MENSAGEM
+      // ==============================================
+
+      try {
+
+        await pool.query(
+          `
+          INSERT INTO mensagens
           (
             telefone,
             mensagem,
             whatsapp_message_id
           )
-        VALUES
-          ($1, $2, $3)
-        `,
-        [
-          telefone,
-          texto,
-          whatsappMessageId
-        ]
-      );
+          VALUES
+          (
+            $1,
+            $2,
+            $3
+          )
+          `,
+          [
+            telefone,
+            texto,
+            whatsappMessageId
+          ]
+        );
+
+        console.log(
+          "Mensagem recebida salva na tabela mensagens."
+        );
+
+      } catch (erroBanco) {
+
+        console.error(
+          "Erro ao salvar mensagem recebida:",
+          erroBanco
+        );
+
+      }
+
+      // ==============================================
+      // PROCESSAR CONVERSA
+      // ==============================================
 
       await processarConversa(
         telefone,
@@ -2779,9 +3642,21 @@ app.post(
     } catch (error) {
 
       console.error(
-        "Erro ao processar webhook:",
+        "===================================="
+      );
+
+      console.error(
+        "ERRO NO WEBHOOK"
+      );
+
+      console.error(
         error
       );
+
+      console.error(
+        "===================================="
+      );
+
     }
   }
 );
@@ -2837,7 +3712,9 @@ function iniciarAgendamentoSemanal() {
           "Erro na compilação semanal:",
           error
         );
+
       }
+
     },
     {
       timezone: TIMEZONE,
@@ -2851,45 +3728,60 @@ function iniciarAgendamentoSemanal() {
 // ======================================================
 
 app.use(
-  (err, req, res, next) => {
+  (
+    err,
+    req,
+    res,
+    next
+  ) => {
 
     console.error(
       "Erro não tratado:",
       err
     );
 
-    if (res.headersSent) {
+    if (
+      res.headersSent
+    ) {
+
       return next(err);
+
     }
 
-    res.status(500).send(
-      paginaHTML(
-        `
-        <div class="card">
+    res
+      .status(500)
+      .send(
+        paginaHTML(
+          `
 
-          <h2>
-            ❌ Erro interno
-          </h2>
+          <div class="card">
 
-          <div class="erro">
-            ${escaparHTML(
-              err?.message ||
-              String(err)
-            )}
+            <h2>
+              ❌ Erro interno
+            </h2>
+
+            <div class="erro">
+
+              ${escaparHTML(
+                err?.message ||
+                String(err)
+              )}
+
+            </div>
+
+            <a
+              href="/"
+              class="botao"
+            >
+              Página inicial
+            </a>
+
           </div>
 
-          <a
-            href="/"
-            class="botao"
-          >
-            Página inicial
-          </a>
-
-        </div>
-        `,
-        "Erro"
-      )
-    );
+          `,
+          "Erro"
+        )
+      );
   }
 );
 
@@ -2914,8 +3806,9 @@ async function iniciarServidor() {
         );
 
         console.log(
-          `Painel administrativo disponível em /admin`
+          "Painel administrativo disponível em /admin"
         );
+
       }
     );
 
