@@ -576,6 +576,247 @@ async function enviarMensagemWhatsApp(
 }
 
 // ======================================================
+// MENU INTERATIVO DO WHATSAPP
+// ======================================================
+
+async function enviarMenuMissionarios(
+  telefone
+) {
+  const resultado =
+    await pool.query(`
+      SELECT
+        id,
+        nome
+      FROM missionarios
+      WHERE ativo = TRUE
+      ORDER BY nome ASC
+    `);
+
+  if (
+    resultado.rows.length === 0
+  ) {
+    await enviarMensagemWhatsApp(
+      telefone,
+      "No momento não há missionários disponíveis para receber mensagens."
+    );
+
+    return;
+  }
+
+  /*
+   * O WhatsApp permite no máximo
+   * 10 opções em uma lista interativa.
+   */
+
+  if (
+    resultado.rows.length > 10
+  ) {
+    let texto =
+      "💙 *Mensagens Missionárias*\n\n" +
+      "Para qual missionário você deseja enviar uma mensagem?\n\n";
+
+    resultado.rows.forEach(
+      (missionario, indice) => {
+        texto +=
+          `${indice + 1} - ${missionario.nome}\n`;
+      }
+    );
+
+    texto +=
+      "\nDigite somente o número correspondente ao missionário.";
+
+    await salvarEtapa(
+      telefone,
+      "AGUARDANDO_MISSIONARIO"
+    );
+
+    await enviarMensagemWhatsApp(
+      telefone,
+      texto
+    );
+
+    return;
+  }
+
+  await salvarEtapa(
+    telefone,
+    "AGUARDANDO_MISSIONARIO"
+  );
+
+  const rows =
+    resultado.rows.map(
+      (missionario) => ({
+        id:
+          `missionario_${missionario.id}`,
+
+        title:
+          missionario.nome
+            .substring(0, 24)
+      })
+    );
+
+  if (
+    !WHATSAPP_TOKEN ||
+    !PHONE_NUMBER_ID
+  ) {
+    console.error(
+      "WHATSAPP_TOKEN ou PHONE_NUMBER_ID não configurado."
+    );
+
+    return;
+  }
+
+  try {
+
+    const resposta =
+      await fetch(
+        `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
+        {
+          method: "POST",
+
+          headers: {
+            Authorization:
+              `Bearer ${WHATSAPP_TOKEN}`,
+
+            "Content-Type":
+              "application/json"
+          },
+
+          body: JSON.stringify({
+            messaging_product:
+              "whatsapp",
+
+            recipient_type:
+              "individual",
+
+            to:
+              telefone,
+
+            type:
+              "interactive",
+
+            interactive: {
+              type:
+                "list",
+
+              header: {
+                type:
+                  "text",
+
+                text:
+                  "💙 Mensagens Missionárias"
+              },
+
+              body: {
+                text:
+                  "Para qual missionário você deseja enviar uma mensagem?"
+              },
+
+              footer: {
+                text:
+                  "Escolha um missionário na lista abaixo."
+              },
+
+              action: {
+                button:
+                  "Escolher missionário",
+
+                sections: [
+                  {
+                    title:
+                      "Missionários",
+
+                    rows:
+                      rows
+                  }
+                ]
+              }
+            }
+          })
+        }
+      );
+
+    const resultadoJson =
+      await resposta.json();
+
+    if (
+      !resposta.ok
+    ) {
+
+      console.error(
+        "Erro ao enviar menu interativo:",
+        JSON.stringify(
+          resultadoJson,
+          null,
+          2
+        )
+      );
+
+      /*
+       * Se a API não aceitar o menu,
+       * usamos automaticamente o
+       * menu de texto.
+       */
+
+      let texto =
+        "💙 *Mensagens Missionárias*\n\n" +
+        "Para qual missionário você deseja enviar uma mensagem?\n\n";
+
+      resultado.rows.forEach(
+        (missionario, indice) => {
+          texto +=
+            `${indice + 1} - ${missionario.nome}\n`;
+        }
+      );
+
+      texto +=
+        "\nDigite somente o número correspondente ao missionário.";
+
+      await enviarMensagemWhatsApp(
+        telefone,
+        texto
+      );
+
+      return;
+    }
+
+    console.log(
+      `Menu interativo enviado para ${telefone}.`
+    );
+
+  } catch (error) {
+
+    console.error(
+      "Erro ao enviar menu interativo:",
+      error
+    );
+
+    /*
+     * Fallback para menu de texto.
+     */
+
+    let texto =
+      "💙 *Mensagens Missionárias*\n\n" +
+      "Para qual missionário você deseja enviar uma mensagem?\n\n";
+
+    resultado.rows.forEach(
+      (missionario, indice) => {
+        texto +=
+          `${indice + 1} - ${missionario.nome}\n`;
+      }
+    );
+
+    texto +=
+      "\nDigite somente o número correspondente ao missionário.";
+
+    await enviarMensagemWhatsApp(
+      telefone,
+      texto
+    );
+  }
+}
+
+// ======================================================
 // CONTROLE DA CONVERSA
 // ======================================================
 
@@ -655,55 +896,6 @@ async function reiniciarConversa(
   );
 }
 
-async function enviarListaMissionarios(
-  telefone
-) {
-  const resultado =
-    await pool.query(`
-      SELECT
-        id,
-        nome
-      FROM missionarios
-      WHERE ativo = TRUE
-      ORDER BY nome ASC
-    `);
-
-  if (
-    resultado.rows.length === 0
-  ) {
-    await enviarMensagemWhatsApp(
-      telefone,
-      "No momento não há missionários disponíveis para receber mensagens."
-    );
-
-    return;
-  }
-
-  let texto =
-    "💙 *Mensagens Missionárias*\n\n" +
-    "Para qual missionário você deseja enviar uma mensagem?\n\n";
-
-  resultado.rows.forEach(
-    (missionario, indice) => {
-      texto +=
-        `${indice + 1} - ${missionario.nome}\n`;
-    }
-  );
-
-  texto +=
-    "\nDigite somente o número correspondente ao missionário.";
-
-  await salvarEtapa(
-    telefone,
-    "AGUARDANDO_MISSIONARIO"
-  );
-
-  await enviarMensagemWhatsApp(
-    telefone,
-    texto
-  );
-}
-
 // ======================================================
 // FLUXO DA FAMÍLIA
 // ======================================================
@@ -711,7 +903,8 @@ async function enviarListaMissionarios(
 async function processarConversa(
   telefone,
   texto,
-  whatsappMessageId
+  whatsappMessageId,
+  missionarioSelecionadoId = null
 ) {
   const mensagem =
     texto.trim();
@@ -737,6 +930,7 @@ async function processarConversa(
   }
 
   if (!conversa) {
+
     await enviarMensagemWhatsApp(
       telefone,
       "Olá! 👋\n\n" +
@@ -744,52 +938,108 @@ async function processarConversa(
       "Aqui você pode deixar uma mensagem para um missionário."
     );
 
-    await enviarListaMissionarios(
+    await enviarMenuMissionarios(
       telefone
     );
 
     return;
   }
 
+  // ==================================================
+  // ESCOLHA DO MISSIONÁRIO
+  // ==================================================
+
   if (
     conversa.etapa ===
     "AGUARDANDO_MISSIONARIO"
   ) {
-    const numero =
-      Number.parseInt(
-        mensagem,
-        10
-      );
 
-    const resultado =
-      await pool.query(`
-        SELECT
-          id,
-          nome
-        FROM missionarios
-        WHERE ativo = TRUE
-        ORDER BY nome ASC
-      `);
+    let missionario;
+
+    /*
+     * Se o usuário clicou no menu,
+     * recebemos diretamente o ID.
+     */
 
     if (
-      !Number.isInteger(numero) ||
-      numero < 1 ||
-      numero >
-        resultado.rows.length
+      missionarioSelecionadoId
     ) {
-      await enviarMensagemWhatsApp(
-        telefone,
-        "Opção inválida.\n\n" +
-        "Digite somente o número correspondente ao missionário."
-      );
 
-      return;
+      const resultado =
+        await pool.query(
+          `
+          SELECT
+            id,
+            nome
+          FROM missionarios
+          WHERE id = $1
+            AND ativo = TRUE
+          `,
+          [
+            missionarioSelecionadoId
+          ]
+        );
+
+      if (
+        resultado.rowCount === 0
+      ) {
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Não foi possível identificar esse missionário.\n\n" +
+          "Digite *menu* para tentar novamente."
+        );
+
+        return;
+      }
+
+      missionario =
+        resultado.rows[0];
+
+    } else {
+
+      /*
+       * Mantém compatibilidade
+       * com o antigo menu numérico.
+       */
+
+      const numero =
+        Number.parseInt(
+          mensagem,
+          10
+        );
+
+      const resultado =
+        await pool.query(`
+          SELECT
+            id,
+            nome
+          FROM missionarios
+          WHERE ativo = TRUE
+          ORDER BY nome ASC
+        `);
+
+      if (
+        !Number.isInteger(numero) ||
+        numero < 1 ||
+        numero >
+          resultado.rows.length
+      ) {
+
+        await enviarMensagemWhatsApp(
+          telefone,
+          "Opção inválida.\n\n" +
+          "Escolha um missionário no menu ou digite o número correspondente."
+        );
+
+        return;
+      }
+
+      missionario =
+        resultado.rows[
+          numero - 1
+        ];
     }
-
-    const missionario =
-      resultado.rows[
-        numero - 1
-      ];
 
     await salvarEtapa(
       telefone,
@@ -808,13 +1058,19 @@ async function processarConversa(
     return;
   }
 
+  // ==================================================
+  // NOME DA FAMÍLIA
+  // ==================================================
+
   if (
     conversa.etapa ===
     "AGUARDANDO_FAMILIA"
   ) {
+
     if (
       mensagem.length < 2
     ) {
+
       await enviarMensagemWhatsApp(
         telefone,
         "Digite o nome da sua família."
@@ -851,11 +1107,17 @@ async function processarConversa(
     return;
   }
 
+  // ==================================================
+  // MENSAGEM PARA O MISSIONÁRIO
+  // ==================================================
+
   if (
     conversa.etapa ===
     "AGUARDANDO_MENSAGEM"
   ) {
+
     if (!mensagem) {
+
       await enviarMensagemWhatsApp(
         telefone,
         "A mensagem não pode ficar vazia."
@@ -882,6 +1144,7 @@ async function processarConversa(
     if (
       missionario.rowCount === 0
     ) {
+
       await reiniciarConversa(
         telefone
       );
@@ -951,6 +1214,10 @@ async function processarConversa(
 
     return;
   }
+
+  // ==================================================
+  // REINÍCIO
+  // ==================================================
 
   await reiniciarConversa(
     telefone
@@ -1058,9 +1325,11 @@ async function enviarCompilacoesPendentes() {
     const missionario of
     grupos.values()
   ) {
+
     if (
       !missionario.email?.trim()
     ) {
+
       console.log(
         `Missionário ${missionario.nome} não possui e-mail cadastrado.`
       );
@@ -1080,6 +1349,7 @@ async function enviarCompilacoesPendentes() {
         .mensagens
         .map(
           (item) => {
+
             const familia =
               escaparHTML(
                 item.nome_familia
@@ -1156,6 +1426,7 @@ async function enviarCompilacoesPendentes() {
         .join("");
 
     try {
+
       console.log(
         `Enviando compilação para ${missionario.nome} (${missionario.email})...`
       );
@@ -1261,6 +1532,7 @@ async function enviarCompilacoesPendentes() {
       if (
         resultadoEmail.error
       ) {
+
         console.error(
           `Erro retornado pelo Resend para ${missionario.nome}:`,
           resultadoEmail.error
@@ -1308,7 +1580,9 @@ async function enviarCompilacoesPendentes() {
       console.log(
         `${quantidade} mensagem(ns) marcada(s) como ENVIADA.`
       );
+
     } catch (error) {
+
       console.error(
         `Erro ao enviar compilação para ${missionario.nome}:`,
         error
@@ -1358,6 +1632,7 @@ app.get(
   async (req, res) => {
 
     try {
+
       const resultado =
         await pool.query(`
           SELECT
@@ -1426,6 +1701,7 @@ app.get(
       if (
         req.query.email === "ok"
       ) {
+
         aviso = `
           <div class="sucesso">
             E-mail de teste enviado com sucesso.
@@ -1437,6 +1713,7 @@ app.get(
         req.query.email ===
         "erro"
       ) {
+
         aviso = `
           <div class="erro">
             Não foi possível enviar o e-mail de teste.
@@ -1448,6 +1725,7 @@ app.get(
       if (
         req.query.editado === "ok"
       ) {
+
         aviso = `
           <div class="sucesso">
             Missionário atualizado com sucesso.
@@ -1459,6 +1737,7 @@ app.get(
         req.query.compilacao ===
         "ok"
       ) {
+
         const totalMensagens =
           Number(
             req.query.mensagens ||
@@ -1516,6 +1795,7 @@ app.get(
         req.query.compilacao ===
         "vazia"
       ) {
+
         aviso = `
           <div class="aviso">
             Não existem mensagens PENDENTES
@@ -1528,6 +1808,7 @@ app.get(
         req.query.compilacao ===
         "erro"
       ) {
+
         aviso = `
           <div class="erro">
             Ocorreu um erro ao processar
@@ -1660,6 +1941,7 @@ app.get(
                 item.status ===
                 "ENVIADA"
               ) {
+
                 classeStatus =
                   "enviada";
               }
@@ -1722,7 +2004,8 @@ app.get(
         estatisticas
           .rows[0]
           ?.enviadas || 0;
-            res.send(
+
+      res.send(
         paginaHTML(`
 
           ${aviso}
@@ -2699,6 +2982,11 @@ app.post(
   "/webhook",
   async (req, res) => {
 
+    /*
+     * Respondemos imediatamente ao Meta
+     * para evitar timeout.
+     */
+
     res.sendStatus(200);
 
     try {
@@ -2737,10 +3025,76 @@ app.post(
         message.type ||
         "desconhecido";
 
-      const texto =
+      /*
+       * Texto normal.
+       */
+
+      let texto =
         message
           .text
           ?.body || "";
+
+      /*
+       * ID do missionário escolhido
+       * pelo menu interativo.
+       */
+
+      let missionarioSelecionadoId =
+        null;
+
+      /*
+       * Verifica se o usuário clicou
+       * em uma opção da lista.
+       */
+
+      if (
+        tipo === "interactive" &&
+        message
+          .interactive
+          ?.type === "list_reply"
+      ) {
+
+        const idSelecionado =
+          message
+            .interactive
+            ?.list_reply
+            ?.id;
+
+        const tituloSelecionado =
+          message
+            .interactive
+            ?.list_reply
+            ?.title ||
+          "";
+
+        if (
+          idSelecionado
+            ?.startsWith(
+              "missionario_"
+            )
+        ) {
+
+          missionarioSelecionadoId =
+            Number.parseInt(
+              idSelecionado.replace(
+                "missionario_",
+                ""
+              ),
+              10
+            );
+        }
+
+        texto =
+          tituloSelecionado;
+
+        console.log(
+          `Opção selecionada no menu: ${tituloSelecionado}`
+        );
+
+        console.log(
+          `ID do missionário selecionado: ${missionarioSelecionadoId}`
+        );
+      }
 
       console.log(
         "Nova mensagem recebida:"
@@ -2761,6 +3115,11 @@ app.post(
       console.log(
         `Tipo: ${tipo}`
       );
+
+      /*
+       * Salva também no histórico geral
+       * de mensagens.
+       */
 
       const registro =
         await pool.query(
@@ -2814,13 +3173,29 @@ app.post(
         "Mensagem salva no banco de dados."
       );
 
+      /*
+       * Aceitamos:
+       *
+       * - mensagem de texto
+       * - escolha de lista interativa
+       */
+
+      const mensagemValida =
+        tipo === "text" ||
+        (
+          tipo === "interactive" &&
+          message
+            .interactive
+            ?.type === "list_reply"
+        );
+
       if (
-        tipo !== "text"
+        !mensagemValida
       ) {
 
         await enviarMensagemWhatsApp(
           telefone,
-          "Por enquanto, envie sua mensagem em formato de texto."
+          "Por enquanto, envie sua mensagem em formato de texto ou utilize o menu disponível."
         );
 
         return;
@@ -2829,7 +3204,8 @@ app.post(
       await processarConversa(
         telefone,
         texto,
-        whatsappMessageId
+        whatsappMessageId,
+        missionarioSelecionadoId
       );
 
     } catch (error) {
