@@ -450,6 +450,24 @@ function paginaHTML(
     .login { margin:55px auto; }
     @media(max-width:700px) { header { padding:26px 20px; } main { padding:20px 14px 45px; } .estatisticas { grid-template-columns:1fr 1fr; gap:10px; } .estatistica { padding:17px 13px; } .numero { font-size:36px; } .card { padding:18px 15px; } .card h2 { font-size:22px; } button { max-width:100%; } }
     @media(max-width:420px) { .estatisticas { grid-template-columns:1fr; } }
+
+    /* Segunda etapa visual: navegação e identidade missionária */
+    html { scroll-behavior:smooth; }
+    .painel-layout { display:grid; grid-template-columns:230px minmax(0,1fr); gap:24px; align-items:start; }
+    .painel-conteudo { min-width:0; }
+    .painel-menu { position:sticky; top:18px; background:#fff; border:1px solid var(--borda); border-radius:18px; padding:20px 14px; box-shadow:0 8px 24px rgba(41,83,116,.075); }
+    .painel-menu strong { display:block; font-family:Georgia,serif; color:var(--marinho); font-size:21px; padding:5px 12px 15px; }
+    .painel-menu a { display:block; padding:12px; margin:3px 0; color:#315d7f; border-radius:10px; text-decoration:none; font-weight:600; }
+    .painel-menu a:hover,.painel-menu a:focus-visible { background:#eaf5fb; }
+    .painel-menu .menu-nota { font-size:13px; line-height:1.5; color:#6a8295; padding:16px 12px 4px; border-top:1px solid var(--borda); margin-top:14px; }
+    .painel-boas-vindas { border:1px solid #d7e9f1; border-radius:18px; background:linear-gradient(110deg,#e2f2f9,#fff8ef); padding:22px 26px; margin-bottom:22px; }
+    .painel-boas-vindas h2 { font-family:Georgia,serif; color:#234b70; margin:0 0 8px; }
+    .painel-boas-vindas p { margin:0; line-height:1.6; }
+    .painel-conteudo .card,.painel-conteudo .estatisticas { scroll-margin-top:20px; }
+    .tabela-rolagem { overflow-x:auto; max-width:100%; }
+    .tabela-rolagem table { min-width:620px; }
+    @media(max-width:900px) { .painel-layout { grid-template-columns:1fr; } .painel-menu { position:static; } .painel-menu nav { display:flex; flex-wrap:wrap; gap:5px; } .painel-menu a { flex:1 1 135px; text-align:center; } }
+    @media(max-width:700px) { .tabela-rolagem table { min-width:0; } .painel-boas-vindas { padding:19px; } }
   </style>
 </head>
 
@@ -2071,6 +2089,24 @@ app.get(
       res.send(
         paginaHTML(`
 
+          <div class="painel-layout">
+          <aside class="painel-menu" aria-label="Navegação do painel">
+            <strong>✉ Sua missão</strong>
+            <nav aria-label="Seções do painel">
+              <a href="#inicio">⌂ Início</a>
+              <a href="#compilacao">✉ Compilação</a>
+              <a href="#teste-email">✧ Testar e-mail</a>
+              <a href="#cadastro">＋ Cadastrar</a>
+              <a href="#missionarios">♡ Missionários</a>
+              <a href="#mensagens">▤ Mensagens</a>
+            </nav>
+            <p class="menu-nota">Cada mensagem aproxima uma família de quem está servindo. 💙</p>
+          </aside>
+          <div class="painel-conteudo">
+          <section id="inicio" class="painel-boas-vindas">
+            <h2>Bem-vindo ao seu painel 🌿</h2>
+            <p>Um espaço para cuidar das mensagens e fortalecer conexões, mesmo à distância.</p>
+          </section>
           <form method="POST" action="/admin/logout" style="text-align:right;margin-bottom:12px">
             ${campoCSRF(req)}<button type="submit" class="desativar">Sair do painel</button>
           </form>
@@ -2096,7 +2132,7 @@ app.get(
 
           </div>
 
-          <div class="card">
+          <div class="card" id="compilacao">
 
             <h2>
               📬 Enviar compilação
@@ -2143,7 +2179,7 @@ app.get(
 
           </div>
 
-          <div class="card">
+          <div class="card" id="teste-email">
 
             <h2>
               Testar envio de e-mail
@@ -2183,7 +2219,7 @@ app.get(
 
           </div>
 
-          <div class="card">
+          <div class="card" id="cadastro">
 
             <h2>
               Cadastrar missionário
@@ -2236,7 +2272,7 @@ app.get(
 
           </div>
 
-          <div class="card">
+          <div class="card" id="missionarios">
 
             <h2>
               Missionários cadastrados
@@ -2272,7 +2308,7 @@ app.get(
 
           </div>
 
-          <div class="card">
+          <div class="card" id="mensagens">
 
             <h2>
               Mensagens recebidas
@@ -2313,6 +2349,8 @@ app.get(
 
           </div>
 
+          </div>
+          </div>
         `)
       );
 
