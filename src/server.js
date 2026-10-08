@@ -1862,6 +1862,12 @@ app.get(
 
       let aviso = "";
 
+      if (req.query.exclusao === "ok") {
+        aviso = `<div class="sucesso">Mensagem excluída com sucesso.</div>`;
+      } else if (req.query.exclusao === "nao-encontrada") {
+        aviso = `<div class="erro">Mensagem não encontrada ou já excluída.</div>`;
+      }
+
       if (
         req.query.email === "ok"
       ) {
@@ -2145,6 +2151,17 @@ app.get(
                         item.status
                       )}
                     </span>
+                  </td>
+
+                  <td>
+                    <form method="POST" action="/admin/mensagens/${item.id}/excluir"
+                      onsubmit="return confirm('Tem certeza de que deseja excluir esta mensagem? Esta ação não poderá ser desfeita.');">
+                      ${campoCSRF(req)}
+                      <button type="submit" aria-label="Excluir mensagem ${item.id}"
+                        style="background:#b91c1c;color:white;border:0;border-radius:8px;padding:9px 12px;cursor:pointer;white-space:nowrap;">
+                        🗑 Excluir
+                      </button>
+                    </form>
                   </td>
 
                 </tr>
@@ -2451,6 +2468,7 @@ app.get(
                   <th>Mensagem</th>
                   <th>Recebida em</th>
                   <th>Status</th>
+                  <th>Ações</th>
                 </tr>
               </thead>
 
@@ -2459,7 +2477,7 @@ app.get(
                   linhasMensagens ||
                   `
                     <tr>
-                      <td colspan="6">
+                      <td colspan="7">
                         Nenhuma mensagem recebida.
                       </td>
                     </tr>
@@ -2491,6 +2509,26 @@ app.get(
     }
   }
 );
+
+// ======================================================
+// EXCLUIR UMA MENSAGEM (SOMENTE ADMINISTRADOR)
+// ======================================================
+app.post("/admin/mensagens/:id/excluir", verificarAdmin, async (req, res) => {
+  const id = req.params.id;
+  if (!/^[1-9]\d*$/.test(id)) return res.status(400).send("ID de mensagem inválido.");
+  try {
+    const resultado = await pool.query(
+      "DELETE FROM mensagens_missionarios WHERE id = $1 RETURNING id",
+      [id]
+    );
+    return res.redirect(303, resultado.rowCount
+      ? "/admin?exclusao=ok#mensagens"
+      : "/admin?exclusao=nao-encontrada#mensagens");
+  } catch (erro) {
+    console.error("Erro ao excluir mensagem:", erro);
+    return res.status(500).send("Não foi possível excluir a mensagem.");
+  }
+});
 
 // ======================================================
 // ENVIAR COMPILAÇÃO MANUALMENTE
