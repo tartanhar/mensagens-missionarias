@@ -501,6 +501,38 @@ function paginaHTML(
       .tabela-rolagem table { min-width:620px; }
     }
     @media(max-width:380px) { .estatisticas { grid-template-columns:1fr; } }
+
+    /* V4: acabamento compacto para telas pequenas — apenas CSS */
+    @media (max-width:700px) {
+      header { padding:16px 15px 17px; }
+      header h1 { font-size:clamp(23px,5.4vw,30px); line-height:1.18; letter-spacing:-.4px; }
+      header p { font-size:13px; line-height:1.4; margin-top:5px; }
+      header:after { font-size:115px; top:-25px; right:0; }
+      main { padding:12px 12px 32px; }
+      .painel-layout { gap:10px; }
+      .painel-menu { padding:7px 10px; }
+      .menu-retratil > summary { font-size:19px; min-height:42px; padding:6px 8px; }
+      .painel-boas-vindas { padding:14px 15px; margin-bottom:12px; }
+      .painel-boas-vindas h2 { font-size:clamp(20px,5vw,24px); line-height:1.2; margin-bottom:5px; }
+      .painel-boas-vindas p { font-size:14px; line-height:1.45; }
+      .painel-conteudo > form[action="/admin/logout"] { margin-bottom:10px !important; }
+      .painel-conteudo > form[action="/admin/logout"] button { min-height:40px; padding:9px 13px; }
+      .estatisticas { gap:8px; margin-bottom:14px; }
+      .estatistica { padding:13px 12px; }
+      .estatistica p { font-size:12px; line-height:1.35; }
+      .estatistica:after { font-size:40px; right:10px; top:4px; }
+      .numero { font-size:32px; }
+      .card { padding:16px 14px; margin-bottom:14px; }
+      .card h2 { font-size:clamp(20px,5vw,24px); line-height:1.25; }
+      .card p { line-height:1.5; }
+      .painel-conteudo button,.painel-conteudo .botao { max-width:100%; white-space:normal; }
+    }
+    @media (max-width:380px) {
+      .estatisticas { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .estatistica { padding:12px 9px; }
+      .estatistica p { font-size:11px; }
+      .numero { font-size:29px; }
+    }
   </style>
 </head>
 
