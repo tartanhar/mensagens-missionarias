@@ -1219,8 +1219,9 @@ async function processarConversa(
     await enviarMensagemWhatsApp(
       telefone,
       `Você selecionou *${missionario.nome}*.\n\n` +
-      "Qual é o nome da sua família?\n\n" +
-      "Exemplo: Família Silva"
+      "💌 Quem está enviando esta mensagem?\n\n" +
+      "Pode informar seu nome ou o nome da sua família.\n\n" +
+      "Exemplo: Maria Silva ou Família Silva."
     );
 
     return;
@@ -1241,7 +1242,7 @@ async function processarConversa(
 
       await enviarMensagemWhatsApp(
         telefone,
-        "Digite o nome da sua família."
+        "Por favor, informe seu nome ou o nome da sua família."
       );
 
       return;
