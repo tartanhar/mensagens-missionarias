@@ -533,6 +533,17 @@ function paginaHTML(
       .estatistica p { font-size:11px; }
       .numero { font-size:29px; }
     }
+
+    /* V5: lembrete semanal local, sem agendamento ou envio */
+    .lembrete-semanal { background:linear-gradient(115deg,#f1f9fc,#fffaf1); border:1px solid #cfe4ee; border-radius:17px; padding:20px; margin:0 0 18px; box-shadow:0 6px 18px rgba(29,75,107,.05); }
+    .lembrete-semanal h2 { color:#214e70; margin:0 0 9px; font-size:clamp(21px,3vw,26px); }
+    .lembrete-semanal p { margin:0 0 12px; line-height:1.5; }
+    .lembrete-semanal .lembrete-info { background:#eaf5fc; padding:11px 13px; border-radius:10px; margin-bottom:14px; }
+    .lembrete-acoes { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .lembrete-acoes a,.lembrete-acoes button { display:inline-block; border-radius:10px; padding:10px 15px; min-height:44px; text-decoration:none; font:inherit; cursor:pointer; }
+    .lembrete-acoes a { background:#286fba; color:#fff; }
+    .lembrete-acoes button { background:#eef2f6; color:#35516a; border:1px solid #d9e4ec; }
+    @media(max-width:700px) { .lembrete-semanal { padding:15px; } .lembrete-acoes a,.lembrete-acoes button { flex:1; text-align:center; } }
   </style>
 </head>
 
@@ -2188,6 +2199,39 @@ app.get(
             ${campoCSRF(req)}<button type="submit" class="desativar">Sair do painel</button>
           </form>
           ${aviso}
+
+          ${Number(pendentes) > 0 ? `
+          <section class="lembrete-semanal" id="lembrete-semanal" aria-labelledby="lembrete-titulo" hidden>
+            <h2 id="lembrete-titulo">🔔 Lembrete da semana 💌</h2>
+            <p>É hora de aproximar famílias e missionários!</p>
+            <div class="lembrete-info"><strong>Você tem ${Number(pendentes)} ${Number(pendentes) === 1 ? "mensagem pendente" : "mensagens pendentes"}.</strong><br>Confira as mensagens antes de enviar a compilação semanal.</div>
+            <div class="lembrete-acoes">
+              <a href="#mensagens">✉ Ver mensagens</a>
+              <button type="button" id="lembrete-adiar">Lembrar depois</button>
+            </div>
+          </section>
+          <script>
+            (() => {
+              const aviso = document.getElementById('lembrete-semanal');
+              if (!aviso) return;
+              // Exibe a partir de segunda-feira, até domingo, enquanto houver pendências.
+              // Ocultação temporária somente nesta aba; não altera banco nem dispara e-mails.
+              const agora = new Date();
+              const partes = new Intl.DateTimeFormat('en-US', {
+                timeZone: 'America/Sao_Paulo', weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit'
+              }).formatToParts(agora);
+              const valor = tipo => partes.find(p => p.type === tipo)?.value || '';
+              const data = valor('year') + '-' + valor('month') + '-' + valor('day');
+              const chave = 'mm_lembrete_adiado_' + data;
+              try { if (sessionStorage.getItem(chave) === '1') return; } catch (_) {}
+              aviso.hidden = false;
+              document.getElementById('lembrete-adiar')?.addEventListener('click', () => {
+                try { sessionStorage.setItem(chave, '1'); } catch (_) {}
+                aviso.hidden = true;
+              });
+            })();
+          </script>
+          ` : ""}
 
           <div class="estatisticas">
 
