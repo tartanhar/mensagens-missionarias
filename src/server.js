@@ -415,16 +415,51 @@ function paginaHTML(
         padding: 7px;
       }
     }
+
+    /* Tema acolhedor e missionário — somente apresentação */
+    :root { --marinho:#234b70; --azul:#3b76ac; --ceu:#eaf5fb; --borda:#dbe9f0; --texto:#294661; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color:var(--texto); background:linear-gradient(140deg,#edf7fb 0%,#f8fbfd 47%,#edf3f6 100%); min-height:100vh; }
+    header { background:linear-gradient(105deg,rgba(231,244,251,.98),rgba(251,246,239,.96)),linear-gradient(120deg,#d2e9f5,#f9ead7); color:#244b71; border-bottom:1px solid #d9e8f0; padding:32px max(24px,calc((100vw - 1180px)/2)); position:relative; overflow:hidden; }
+    header:after { content:'✧'; position:absolute; right:7%; top:-46px; font-size:180px; color:rgba(109,157,190,.12); pointer-events:none; }
+    header h1 { font-family:Georgia,serif; font-size:clamp(28px,3.3vw,42px); letter-spacing:-.7px; }
+    header p { color:#58758f; font-size:15px; opacity:1; }
+    main { max-width:1180px; margin:0 auto; padding:30px 22px 70px; }
+    .card,.estatistica { background:rgba(255,255,255,.96); border:1px solid var(--borda); border-radius:18px; box-shadow:0 8px 24px rgba(41,83,116,.075); }
+    .card { padding:clamp(18px,2.6vw,30px); margin-bottom:22px; }
+    .card h2 { font-family:Georgia,serif; color:var(--marinho); font-size:clamp(21px,2vw,27px); }
+    .estatisticas { gap:18px; margin-bottom:24px; }
+    .estatistica { padding:25px 28px; position:relative; overflow:hidden; }
+    .estatistica:after { content:'✦'; position:absolute; right:20px; top:8px; color:#e0eef6; font-size:58px; }
+    .estatistica p { color:#58718a; font-size:15px; }
+    .numero { font-family:Georgia,serif; color:#244b71; font-size:44px; }
+    button,.editar,.ativar,.desativar,.compilacao,.teste-email { border-radius:10px; transition:filter .15s ease,transform .15s ease; }
+    button:hover { filter:brightness(.96); }
+    button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline:3px solid #78b9e8; outline-offset:2px; }
+    .compilacao,.teste-email,.editar { background:#3477b9; }
+    .compilacao { background:#286fba; padding:13px 19px; }
+    .desativar { background:#a74242; }
+    .info { background:#eef7ff; color:#285d93; border:1px solid #d7eafa; border-radius:10px; padding:15px 17px; }
+    th { background:#edf5fa; color:#2b4d6a; }
+    th,td { border-bottom:1px solid #e1ebf1; }
+    tr:hover td { background:#f8fcfe; }
+    input,select,textarea { border-radius:9px; border:1px solid #cbdde8; background:#fff; }
+    .pendente,.enviada,.ativo,.inativo { display:inline-block; border-radius:999px; padding:4px 9px; font-size:13px; }
+    .pendente { color:#996010; background:#fff1d9; }
+    .enviada,.ativo { color:#1a745e; background:#def4eb; }
+    .inativo { color:#9b4141; background:#fce7e7; }
+    .login { margin:55px auto; }
+    @media(max-width:700px) { header { padding:26px 20px; } main { padding:20px 14px 45px; } .estatisticas { grid-template-columns:1fr 1fr; gap:10px; } .estatistica { padding:17px 13px; } .numero { font-size:36px; } .card { padding:18px 15px; } .card h2 { font-size:22px; } button { max-width:100%; } }
+    @media(max-width:420px) { .estatisticas { grid-template-columns:1fr; } }
   </style>
 </head>
 
 <body>
 
 <header>
-  <h1>Mensagens Missionárias</h1>
+  <h1>✉ Mensagens Missionárias</h1>
 
   <p>
-    Painel administrativo
+    Um lugar de carinho, conexão e boas notícias · Painel administrativo
   </p>
 </header>
 
