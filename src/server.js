@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual, scryptSync } from "node:crypto";
 import express from "express";
 import pg from "pg";
 import cron from "node-cron";
@@ -9,6 +10,13 @@ const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  res.set("X-Content-Type-Options", "nosniff");
+  res.set("X-Frame-Options", "DENY");
+  res.set("Referrer-Policy", "no-referrer");
+  next();
+});
 
 // ======================================================
 // VARIÁVEIS DE AMBIENTE
@@ -20,6 +28,8 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const DATABASE_URL = process.env.DATABASE_URL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const ADMIN_SESSION_SECRET = process.env.ADMIN_SESSION_SECRET;
+const SESSION_MAX_AGE = 8 * 60 * 60;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
 const WEEKLY_CRON =
@@ -431,66 +441,95 @@ function paginaHTML(
 // SEGURANÇA DO PAINEL
 // ======================================================
 
+function assinatura(valor) {
+  return createHmac("sha256", ADMIN_SESSION_SECRET).update(valor).digest("hex");
+}
+function compararSeguro(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+function cookieAdmin(req) {
+  const cookies = Object.fromEntries((req.headers.cookie || "").split(";").map(v => {
+    const i = v.indexOf("=");
+    return i < 0 ? ["", ""] : [v.slice(0, i).trim(), v.slice(i + 1).trim()];
+  }));
+  return cookies.mm_admin || "";
+}
+function verificarSessao(req) {
+  if (!ADMIN_SESSION_SECRET) return null;
+  const token = cookieAdmin(req);
+  const partes = token.split(".");
+  if (partes.length !== 3) return null;
+  const [exp, nonce, sig] = partes;
+  if (!/^\d+$/.test(exp) || !/^[a-f0-9]{32}$/.test(nonce)) return null;
+  if (Number(exp) <= Math.floor(Date.now() / 1000)) return null;
+  if (!compararSeguro(sig, assinatura(`${exp}.${nonce}`))) return null;
+  return token;
+}
+function csrfToken(req) {
+  return assinatura(`csrf:${verificarSessao(req)}`);
+}
+function campoCSRF(req) {
+  return `<input type="hidden" name="_csrf" value="${csrfToken(req)}">`;
+}
 function verificarAdmin(req, res, next) {
-  const senha =
-    req.headers["x-admin-password"] ||
-    req.query.senha ||
-    req.body?.senha_admin;
-
-  if (!ADMIN_PASSWORD) {
-    return res
-      .status(500)
-      .send(
-        "ADMIN_PASSWORD não configurado."
-      );
+  if (!ADMIN_PASSWORD || !ADMIN_SESSION_SECRET) {
+    return res.status(503).send("Configuração administrativa incompleta.");
   }
-
-  if (senha !== ADMIN_PASSWORD) {
-    return res
-      .status(401)
-      .send(
-        paginaHTML(`
-          <div class="card login">
-
-            <h2>
-              Acesso administrativo
-            </h2>
-
-            <p>
-              Digite a senha do painel.
-            </p>
-
-            <form
-              method="GET"
-              action="/admin"
-            >
-
-              <label>
-                Senha
-              </label>
-
-              <input
-                type="password"
-                name="senha"
-                required
-              >
-
-              <button
-                class="principal"
-                type="submit"
-              >
-                Entrar
-              </button>
-
-            </form>
-
-          </div>
-        `)
-      );
+  if (!verificarSessao(req)) return res.redirect(303, "/admin/login");
+  if (req.method === "POST" && !compararSeguro(req.body?._csrf || "", csrfToken(req))) {
+    return res.status(403).send("Formulário expirado ou inválido. Recarregue a página.");
   }
-
+  res.set("Cache-Control", "no-store");
   next();
 }
+const tentativasLogin = new Map();
+app.get("/admin/login", (req, res) => {
+  if (verificarSessao(req)) return res.redirect(303, "/admin");
+  res.set("Cache-Control", "no-store");
+  res.send(paginaHTML(`<div class="card login"><h2>Acesso administrativo</h2>
+    <p>Entre com a senha do painel.</p>
+    <form method="POST" action="/admin/login">
+      <label>Senha</label><input type="password" name="senha" autocomplete="current-password" required>
+      <button class="principal" type="submit">Entrar</button>
+    </form></div>`));
+});
+app.post("/admin/login", (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!ADMIN_PASSWORD || !ADMIN_SESSION_SECRET) return res.sendStatus(503);
+  const ip = req.ip || req.socket.remoteAddress || "unknown";
+  const agora = Date.now();
+  const item = tentativasLogin.get(ip) || { contagem: 0, ate: agora + 15 * 60_000 };
+  if (agora > item.ate) { item.contagem = 0; item.ate = agora + 15 * 60_000; }
+  if (item.contagem >= 8) return res.status(429).send("Muitas tentativas. Aguarde 15 minutos.");
+  const senha = typeof req.body?.senha === "string" ? req.body.senha : "";
+  // ADMIN_PASSWORD pode ser texto temporariamente ou hash scrypt no formato scrypt:sal:hash.
+  let correta = false;
+  if (ADMIN_PASSWORD.startsWith("scrypt:")) {
+    const partes = ADMIN_PASSWORD.split(":");
+    if (partes.length === 3 && /^[a-f0-9]{32}$/.test(partes[1]) && /^[a-f0-9]{128}$/.test(partes[2])) {
+      correta = compararSeguro(scryptSync(senha, Buffer.from(partes[1], "hex"), 64).toString("hex"), partes[2]);
+    }
+  } else correta = compararSeguro(senha, ADMIN_PASSWORD);
+  if (!correta) {
+    item.contagem++;
+    tentativasLogin.set(ip, item);
+    return res.status(401).send(paginaHTML(`<div class="card login"><h2>Senha incorreta</h2><a href="/admin/login">Tentar novamente</a></div>`));
+  }
+  tentativasLogin.delete(ip);
+  const exp = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE;
+  const nonce = randomBytes(16).toString("hex");
+  const dados = `${exp}.${nonce}`;
+  res.cookie("mm_admin", `${dados}.${assinatura(dados)}`, {
+    httpOnly: true, secure: true, sameSite: "strict", path: "/admin", maxAge: SESSION_MAX_AGE * 1000
+  });
+  return res.redirect(303, "/admin");
+});
+app.post("/admin/logout", verificarAdmin, (req, res) => {
+  res.clearCookie("mm_admin", { path: "/admin", httpOnly: true, secure: true, sameSite: "strict" });
+  res.redirect(303, "/admin/login");
+});
 
 // ======================================================
 // WHATSAPP
@@ -1691,11 +1730,6 @@ app.get(
             mensagens_missionarios
         `);
 
-      const senha =
-        escaparHTML(
-          req.query.senha || ""
-        );
-
       let aviso = "";
 
       if (
@@ -1876,9 +1910,7 @@ app.get(
 
                     <a
                       class="botao editar"
-                      href="/admin/missionarios/${missionario.id}/editar?senha=${encodeURIComponent(
-                        req.query.senha || ""
-                      )}"
+                      href="/admin/missionarios/${missionario.id}/editar"
                     >
                       Editar
                     </a>
@@ -1888,11 +1920,7 @@ app.get(
                       action="/admin/missionarios/${missionario.id}/status"
                     >
 
-                      <input
-                        type="hidden"
-                        name="senha_admin"
-                        value="${senha}"
-                      >
+                      ${campoCSRF(req)}
 
                       <input
                         type="hidden"
@@ -2008,6 +2036,9 @@ app.get(
       res.send(
         paginaHTML(`
 
+          <form method="POST" action="/admin/logout" style="text-align:right;margin-bottom:12px">
+            ${campoCSRF(req)}<button type="submit" class="desativar">Sair do painel</button>
+          </form>
           ${aviso}
 
           <div class="estatisticas">
@@ -2064,11 +2095,7 @@ app.get(
               "
             >
 
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
+              ${campoCSRF(req)}
 
               <button
                 class="compilacao"
@@ -2098,11 +2125,7 @@ app.get(
               action="/admin/testar-email"
             >
 
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
+              ${campoCSRF(req)}
 
               <label>
                 E-mail para o teste
@@ -2136,11 +2159,7 @@ app.get(
               action="/admin/missionarios"
             >
 
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
+              ${campoCSRF(req)}
 
               <label>
                 Nome do missionário
@@ -2287,9 +2306,6 @@ app.post(
   verificarAdmin,
   async (req, res) => {
 
-    const senhaAdmin =
-      req.body.senha_admin;
-
     try {
 
       console.log(
@@ -2311,17 +2327,12 @@ app.post(
       ) {
 
         return res.redirect(
-          `/admin?senha=${encodeURIComponent(
-            senhaAdmin
-          )}&compilacao=vazia`
+          `/admin?compilacao=vazia`
         );
       }
 
       return res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}` +
-        `&compilacao=ok` +
+        `/admin?compilacao=ok` +
         `&mensagens=${resultado.mensagens}` +
         `&missionarios=${resultado.missionarios}` +
         `&semEmail=${resultado.semEmail}` +
@@ -2336,9 +2347,7 @@ app.post(
       );
 
       return res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}&compilacao=erro`
+        `/admin?compilacao=erro`
       );
     }
   }
@@ -2352,9 +2361,6 @@ app.post(
   "/admin/testar-email",
   verificarAdmin,
   async (req, res) => {
-
-    const senhaAdmin =
-      req.body.senha_admin;
 
     try {
 
@@ -2457,9 +2463,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}&email=ok`
+        `/admin?email=ok`
       );
 
     } catch (error) {
@@ -2470,9 +2474,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senhaAdmin
-        )}&email=erro`
+        `/admin?email=erro`
       );
     }
   }
@@ -2492,8 +2494,7 @@ app.post(
       const {
         nome,
         email,
-        telefone,
-        senha_admin
+        telefone
       } = req.body;
 
       if (!nome?.trim()) {
@@ -2545,9 +2546,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senha_admin
-        )}`
+        `/admin`
       );
 
     } catch (error) {
@@ -2633,11 +2632,6 @@ app.get(
       const missionario =
         resultado.rows[0];
 
-      const senha =
-        escaparHTML(
-          req.query.senha || ""
-        );
-
       res.send(
         paginaHTML(`
 
@@ -2675,11 +2669,7 @@ app.get(
               action="/admin/missionarios/${missionario.id}/editar"
             >
 
-              <input
-                type="hidden"
-                name="senha_admin"
-                value="${senha}"
-              >
+              ${campoCSRF(req)}
 
               <label>
                 Nome do missionário
@@ -2737,9 +2727,7 @@ app.get(
             >
 
               <a
-                href="/admin?senha=${encodeURIComponent(
-                  req.query.senha || ""
-                )}"
+                href="/admin"
               >
                 ← Voltar ao painel
               </a>
@@ -2781,8 +2769,7 @@ app.post(
       const {
         nome,
         email,
-        telefone,
-        senha_admin
+        telefone
       } = req.body;
 
       if (!nome?.trim()) {
@@ -2848,9 +2835,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          senha_admin
-        )}&editado=ok`
+        `/admin?editado=ok`
       );
 
     } catch (error) {
@@ -2909,9 +2894,7 @@ app.post(
       );
 
       res.redirect(
-        `/admin?senha=${encodeURIComponent(
-          req.body.senha_admin
-        )}`
+        `/admin`
       );
 
     } catch (error) {
@@ -3350,7 +3333,7 @@ async function iniciarServidor() {
 
     await inicializarBanco();
 
-    iniciarAgendamentoSemanal();
+    // Agendamento interno desativado: compilação apenas manual durante os testes.
 
     app.listen(
       PORT,
