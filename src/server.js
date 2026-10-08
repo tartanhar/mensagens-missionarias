@@ -468,6 +468,39 @@ function paginaHTML(
     .tabela-rolagem table { min-width:620px; }
     @media(max-width:900px) { .painel-layout { grid-template-columns:1fr; } .painel-menu { position:static; } .painel-menu nav { display:flex; flex-wrap:wrap; gap:5px; } .painel-menu a { flex:1 1 135px; text-align:center; } }
     @media(max-width:700px) { .tabela-rolagem table { min-width:0; } .painel-boas-vindas { padding:19px; } }
+
+    /* V3: usabilidade responsiva, sem alterar rotas ou formulários */
+    .menu-retratil > summary { list-style:none; cursor:pointer; display:flex; align-items:center; justify-content:space-between; font-family:Georgia,serif; color:var(--marinho); font-size:21px; font-weight:bold; padding:5px 12px 15px; }
+    .menu-retratil > summary::-webkit-details-marker { display:none; }
+    .menu-indicador { display:none; }
+    .painel-menu .menu-retratil > nav a { min-height:44px; }
+    .painel-conteudo { overflow-wrap:anywhere; }
+    .painel-conteudo table { display:block; overflow-x:auto; max-width:100%; -webkit-overflow-scrolling:touch; }
+    .painel-conteudo th,.painel-conteudo td { overflow-wrap:normal; }
+    @media(max-width:700px) {
+      body { overflow-x:hidden; }
+      header { padding:22px 16px; }
+      header h1 { font-size:clamp(25px,6vw,36px); }
+      main { padding:16px 12px 38px; }
+      .painel-layout { gap:14px; }
+      .painel-menu { padding:10px 12px; border-radius:14px; }
+      .menu-retratil > summary { padding:9px 8px; min-height:46px; }
+      .menu-indicador { display:inline-block; transition:transform .2s; }
+      .menu-retratil[open] .menu-indicador { transform:rotate(180deg); }
+      .painel-menu nav { display:flex; flex-direction:column; gap:3px; }
+      .painel-menu a { flex:none !important; text-align:left !important; padding:12px 14px; }
+      .painel-boas-vindas { padding:17px; }
+      .painel-boas-vindas h2 { font-size:23px; }
+      .estatisticas { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+      .estatistica { padding:17px 12px; }
+      .estatistica p { font-size:13px; }
+      .numero { font-size:33px; }
+      .card { padding:18px 14px; }
+      .painel-conteudo input,.painel-conteudo select,.painel-conteudo textarea { max-width:100%; }
+      .painel-conteudo button { min-height:44px; }
+      .tabela-rolagem table { min-width:620px; }
+    }
+    @media(max-width:380px) { .estatisticas { grid-template-columns:1fr; } }
   </style>
 </head>
 
@@ -2091,7 +2124,8 @@ app.get(
 
           <div class="painel-layout">
           <aside class="painel-menu" aria-label="Navegação do painel">
-            <strong>✉ Sua missão</strong>
+            <details class="menu-retratil" open>
+              <summary>✉ Sua missão <span class="menu-indicador" aria-hidden="true">⌄</span></summary>
             <nav aria-label="Seções do painel">
               <a href="#inicio">⌂ Início</a>
               <a href="#compilacao">✉ Compilação</a>
@@ -2101,7 +2135,18 @@ app.get(
               <a href="#mensagens">▤ Mensagens</a>
             </nav>
             <p class="menu-nota">Cada mensagem aproxima uma família de quem está servindo. 💙</p>
+            </details>
           </aside>
+          <script>
+            (() => {
+              const menu = document.querySelector('.menu-retratil');
+              if (!menu) return;
+              if (window.matchMedia('(max-width: 700px)').matches) menu.open = false;
+              menu.querySelectorAll('nav a').forEach(link => link.addEventListener('click', () => {
+                if (window.matchMedia('(max-width: 700px)').matches) menu.open = false;
+              }));
+            })();
+          </script>
           <div class="painel-conteudo">
           <section id="inicio" class="painel-boas-vindas">
             <h2>Bem-vindo ao seu painel 🌿</h2>
