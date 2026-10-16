@@ -744,244 +744,51 @@ async function enviarMensagemWhatsApp(
 }
 
 // ======================================================
-// MENU INTERATIVO DO WHATSAPP
+// SELEÇÃO NUMÉRICA DE MISSIONÁRIOS NO WHATSAPP
+// Mostra nomes completos em mensagem de texto.
 // ======================================================
 
-async function enviarMenuMissionarios(
-  telefone
-) {
-  const resultado =
-    await pool.query(`
-      SELECT
-        id,
-        nome
-      FROM missionarios
-      WHERE ativo = TRUE
-      ORDER BY nome ASC
-    `);
+async function enviarMenuMissionarios(telefone) {
+  const resultado = await pool.query(`
+    SELECT id, nome
+    FROM missionarios
+    WHERE ativo = TRUE
+    ORDER BY nome ASC
+  `);
 
-  if (
-    resultado.rows.length === 0
-  ) {
+  if (resultado.rows.length === 0) {
     await enviarMensagemWhatsApp(
       telefone,
       "No momento não há missionários disponíveis para receber mensagens."
     );
-
     return;
   }
 
-  /*
-   * O WhatsApp permite no máximo
-   * 10 opções em uma lista interativa.
-   */
+  await salvarEtapa(telefone, "AGUARDANDO_MISSIONARIO");
 
-  if (
-    resultado.rows.length > 10
-  ) {
-    let texto =
-      "💙 *Mensagens Missionárias*\n\n" +
-      "Para qual missionário você deseja enviar uma mensagem?\n\n";
-
-    resultado.rows.forEach(
-      (missionario, indice) => {
-        texto +=
-          `${indice + 1} - ${missionario.nome}\n`;
-      }
-    );
-
-    texto +=
-      "\nDigite somente o número correspondente ao missionário.";
-
-    await salvarEtapa(
-      telefone,
-      "AGUARDANDO_MISSIONARIO"
-    );
-
-    await enviarMensagemWhatsApp(
-      telefone,
-      texto
-    );
-
-    return;
-  }
-
-  await salvarEtapa(
-    telefone,
-    "AGUARDANDO_MISSIONARIO"
+  const linhas = resultado.rows.map(
+    (missionario, indice) => `${indice + 1} - ${missionario.nome}`
   );
 
-  const rows =
-    resultado.rows.map(
-      (missionario) => ({
-        id:
-          `missionario_${missionario.id}`,
+  // Evita exceder o limite de tamanho de mensagens de texto do WhatsApp.
+  const cabecalho =
+    "💙 *Mensagens Missionárias*\n\n" +
+    "Para qual missionário você deseja enviar uma mensagem?\n\n";
+  const rodape =
+    "\nDigite *somente o número* do missionário escolhido.\n" +
+    "Para voltar à seleção, digite *menu*.";
+  const limite = 3500;
+  let parte = cabecalho;
 
-        title:
-          missionario.nome
-            .substring(0, 24)
-      })
-    );
-
-  if (
-    !WHATSAPP_TOKEN ||
-    !PHONE_NUMBER_ID
-  ) {
-    console.error(
-      "WHATSAPP_TOKEN ou PHONE_NUMBER_ID não configurado."
-    );
-
-    return;
-  }
-
-  try {
-
-    const resposta =
-      await fetch(
-        `https://graph.facebook.com/v26.0/${PHONE_NUMBER_ID}/messages`,
-        {
-          method: "POST",
-
-          headers: {
-            Authorization:
-              `Bearer ${WHATSAPP_TOKEN}`,
-
-            "Content-Type":
-              "application/json"
-          },
-
-          body: JSON.stringify({
-            messaging_product:
-              "whatsapp",
-
-            recipient_type:
-              "individual",
-
-            to:
-              telefone,
-
-            type:
-              "interactive",
-
-            interactive: {
-              type:
-                "list",
-
-              header: {
-                type:
-                  "text",
-
-                text:
-                  "💙 Mensagens Missionárias"
-              },
-
-              body: {
-                text:
-                  "Para qual missionário você deseja enviar uma mensagem?"
-              },
-
-              footer: {
-                text:
-                  "Escolha um missionário na lista abaixo."
-              },
-
-              action: {
-                button:
-                  "Escolher missionário",
-
-                sections: [
-                  {
-                    title:
-                      "Missionários",
-
-                    rows:
-                      rows
-                  }
-                ]
-              }
-            }
-          })
-        }
-      );
-
-    const resultadoJson =
-      await resposta.json();
-
-    if (
-      !resposta.ok
-    ) {
-
-      console.error(
-        "Erro ao enviar menu interativo:",
-        JSON.stringify(
-          resultadoJson,
-          null,
-          2
-        )
-      );
-
-      /*
-       * Se a API não aceitar o menu,
-       * usamos automaticamente o
-       * menu de texto.
-       */
-
-      let texto =
-        "💙 *Mensagens Missionárias*\n\n" +
-        "Para qual missionário você deseja enviar uma mensagem?\n\n";
-
-      resultado.rows.forEach(
-        (missionario, indice) => {
-          texto +=
-            `${indice + 1} - ${missionario.nome}\n`;
-        }
-      );
-
-      texto +=
-        "\nDigite somente o número correspondente ao missionário.";
-
-      await enviarMensagemWhatsApp(
-        telefone,
-        texto
-      );
-
-      return;
+  for (const linha of linhas) {
+    if (parte.length + linha.length + rodape.length + 1 > limite && parte !== cabecalho) {
+      await enviarMensagemWhatsApp(telefone, parte);
+      parte = "";
     }
-
-    console.log(
-      `Menu interativo enviado para ${telefone}.`
-    );
-
-  } catch (error) {
-
-    console.error(
-      "Erro ao enviar menu interativo:",
-      error
-    );
-
-    /*
-     * Fallback para menu de texto.
-     */
-
-    let texto =
-      "💙 *Mensagens Missionárias*\n\n" +
-      "Para qual missionário você deseja enviar uma mensagem?\n\n";
-
-    resultado.rows.forEach(
-      (missionario, indice) => {
-        texto +=
-          `${indice + 1} - ${missionario.nome}\n`;
-      }
-    );
-
-    texto +=
-      "\nDigite somente o número correspondente ao missionário.";
-
-    await enviarMensagemWhatsApp(
-      telefone,
-      texto
-    );
+    parte += linha + "\n";
   }
+
+  await enviarMensagemWhatsApp(telefone, parte + rodape);
 }
 
 // ======================================================
@@ -1171,11 +978,10 @@ async function processarConversa(
        * com o antigo menu numérico.
        */
 
-      const numero =
-        Number.parseInt(
-          mensagem,
-          10
-        );
+      const entrada = mensagem.trim();
+      const numero = /^\d+$/.test(entrada)
+        ? Number(entrada)
+        : NaN;
 
       const resultado =
         await pool.query(`
@@ -1197,7 +1003,7 @@ async function processarConversa(
         await enviarMensagemWhatsApp(
           telefone,
           "Opção inválida.\n\n" +
-          "Escolha um missionário no menu ou digite o número correspondente."
+          "Digite somente o número do missionário escolhido ou envie *menu* para ver a lista novamente."
         );
 
         return;
