@@ -1100,12 +1100,12 @@ async function processarConversa(
   if (conversa.etapa === "AGUARDANDO_EMAIL_RESPOSTA") {
     const pular = ["pular", "não", "nao", "não quero", "nao quero"].includes(comando);
     const email = mensagem.trim().toLowerCase();
-    const valido = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) && email.length <= 254;
+    const valido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
 
     if (!pular && !valido) {
       await enviarMensagemWhatsApp(
         telefone,
-        "Esse e-mail parece inválido. 💙\\n\\nDigite um endereço como nome@exemplo.com ou envie *PULAR*."
+        "Esse e-mail parece inválido. 💙\n\nDigite um endereço como nome@exemplo.com ou envie *PULAR*."
       );
       return;
     }
@@ -1127,13 +1127,13 @@ async function processarConversa(
     await reiniciarConversa(telefone);
     await enviarMensagemWhatsApp(
       telefone,
-      "✅ *Mensagem recebida!*\\n\\n" +
-      `Missionário: *${missionario.rows[0]?.nome || "Selecionado"}*\\n` +
-      `Remetente: *${conversa.nome_familia}*\\n\\n` +
+      "✅ *Mensagem recebida!*\n\n" +
+      `Missionário: *${missionario.rows[0]?.nome || "Selecionado"}*\n` +
+      `Remetente: *${conversa.nome_familia}*\n\n` +
       (pular
-        ? "Você optou por não informar um e-mail para resposta.\\n\\n"
-        : "Seu e-mail foi registrado e será compartilhado somente com o missionário escolhido para que ele possa responder, se desejar.\\n\\n") +
-      "Sua mensagem será incluída na próxima compilação semanal.\\n\\n" +
+        ? "Você optou por não informar um e-mail para resposta.\n\n"
+        : "Seu e-mail foi registrado e será compartilhado somente com o missionário escolhido para que ele possa responder, se desejar.\n\n") +
+      "Sua mensagem será incluída na próxima compilação semanal.\n\n" +
       "Para enviar outra mensagem, digite *menu*. 💙"
     );
     return;
