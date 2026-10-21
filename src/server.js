@@ -87,6 +87,7 @@ async function inicializarBanco() {
         etapa TEXT NOT NULL DEFAULT 'INICIO',
         missionario_id INTEGER REFERENCES missionarios(id),
         nome_familia TEXT,
+        mensagem_pendente_id INTEGER,
         atualizado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -99,11 +100,16 @@ async function inicializarBanco() {
         telefone_familia TEXT NOT NULL,
         nome_familia TEXT NOT NULL,
         mensagem TEXT NOT NULL,
+        email_resposta TEXT,
         status TEXT NOT NULL DEFAULT 'PENDENTE',
         criado_em TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
         enviado_em TIMESTAMPTZ
       );
     `);
+
+    // Migração segura para bancos PostgreSQL já existentes.
+    await pool.query("ALTER TABLE mensagens_missionarios ADD COLUMN IF NOT EXISTS email_resposta TEXT");
+    await pool.query("ALTER TABLE conversas ADD COLUMN IF NOT EXISTS mensagem_pendente_id INTEGER");
 
     console.log("Banco de dados conectado.");
     console.log("Tabela mensagens pronta.");
@@ -803,7 +809,8 @@ async function buscarConversa(telefone) {
         telefone,
         etapa,
         missionario_id,
-        nome_familia
+        nome_familia,
+        mensagem_pendente_id
       FROM conversas
       WHERE telefone = $1
       `,
@@ -817,7 +824,8 @@ async function salvarEtapa(
   telefone,
   etapa,
   missionarioId = null,
-  nomeFamilia = null
+  nomeFamilia = null,
+  mensagemPendenteId = null
 ) {
   await pool.query(
     `
@@ -827,6 +835,7 @@ async function salvarEtapa(
       etapa,
       missionario_id,
       nome_familia,
+      mensagem_pendente_id,
       atualizado_em
     )
 
@@ -836,6 +845,7 @@ async function salvarEtapa(
       $2,
       $3,
       $4,
+      $5,
       CURRENT_TIMESTAMP
     )
 
@@ -847,6 +857,7 @@ async function salvarEtapa(
         EXCLUDED.missionario_id,
       nome_familia =
         EXCLUDED.nome_familia,
+      mensagem_pendente_id = EXCLUDED.mensagem_pendente_id,
       atualizado_em =
         CURRENT_TIMESTAMP
     `,
@@ -854,7 +865,8 @@ async function salvarEtapa(
       telefone,
       etapa,
       missionarioId,
-      nomeFamilia
+      nomeFamilia,
+      mensagemPendenteId
     ]
   );
 }
@@ -1083,6 +1095,51 @@ async function processarConversa(
   }
 
   // ==================================================
+  // E-MAIL OPCIONAL PARA RESPOSTA
+  // ==================================================
+  if (conversa.etapa === "AGUARDANDO_EMAIL_RESPOSTA") {
+    const pular = ["pular", "não", "nao", "não quero", "nao quero"].includes(comando);
+    const email = mensagem.trim().toLowerCase();
+    const valido = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email) && email.length <= 254;
+
+    if (!pular && !valido) {
+      await enviarMensagemWhatsApp(
+        telefone,
+        "Esse e-mail parece inválido. 💙\\n\\nDigite um endereço como nome@exemplo.com ou envie *PULAR*."
+      );
+      return;
+    }
+
+    // Só altera a mensagem criada por este telefone e ainda pendente.
+    if (conversa.mensagem_pendente_id) {
+      await pool.query(
+        `UPDATE mensagens_missionarios
+         SET email_resposta = $1
+         WHERE id = $2 AND telefone_familia = $3 AND status = 'PENDENTE'`,
+        [pular ? null : email, conversa.mensagem_pendente_id, telefone]
+      );
+    }
+
+    const missionario = await pool.query(
+      "SELECT nome FROM missionarios WHERE id = $1",
+      [conversa.missionario_id]
+    );
+    await reiniciarConversa(telefone);
+    await enviarMensagemWhatsApp(
+      telefone,
+      "✅ *Mensagem recebida!*\\n\\n" +
+      `Missionário: *${missionario.rows[0]?.nome || "Selecionado"}*\\n` +
+      `Remetente: *${conversa.nome_familia}*\\n\\n` +
+      (pular
+        ? "Você optou por não informar um e-mail para resposta.\\n\\n"
+        : "Seu e-mail foi registrado e será compartilhado somente com o missionário escolhido para que ele possa responder, se desejar.\\n\\n") +
+      "Sua mensagem será incluída na próxima compilação semanal.\\n\\n" +
+      "Para enviar outra mensagem, digite *menu*. 💙"
+    );
+    return;
+  }
+
+  // ==================================================
   // MENSAGEM PARA O MISSIONÁRIO
   // ==================================================
 
@@ -1133,54 +1190,27 @@ async function processarConversa(
       return;
     }
 
-    await pool.query(
-      `
-      INSERT INTO
-        mensagens_missionarios
-      (
-        whatsapp_message_id,
-        missionario_id,
-        telefone_familia,
-        nome_familia,
-        mensagem,
-        status
-      )
-
-      VALUES
-      (
-        $1,
-        $2,
-        $3,
-        $4,
-        $5,
-        'PENDENTE'
-      )
-
-      ON CONFLICT
-      (whatsapp_message_id)
-      DO NOTHING
-      `,
-      [
-        whatsappMessageId,
-        conversa.missionario_id,
-        telefone,
-        conversa.nome_familia,
-        mensagem
-      ]
+    const registro = await pool.query(
+      `INSERT INTO mensagens_missionarios
+        (whatsapp_message_id, missionario_id, telefone_familia, nome_familia, mensagem, status)
+       VALUES ($1, $2, $3, $4, $5, 'PENDENTE')
+       ON CONFLICT (whatsapp_message_id)
+       DO UPDATE SET whatsapp_message_id = EXCLUDED.whatsapp_message_id
+       RETURNING id`,
+      [whatsappMessageId, conversa.missionario_id, telefone, conversa.nome_familia, mensagem]
     );
 
-    await reiniciarConversa(
-      telefone
+    await salvarEtapa(
+      telefone, "AGUARDANDO_EMAIL_RESPOSTA",
+      conversa.missionario_id, conversa.nome_familia, registro.rows[0].id
     );
 
     await enviarMensagemWhatsApp(
       telefone,
-      "✅ *Mensagem recebida!*\n\n" +
-      `Missionário: *${missionario.rows[0].nome}*\n` +
-      `Família: *${conversa.nome_familia}*\n\n` +
-      "Sua mensagem foi guardada e será incluída na próxima compilação semanal.\n\n" +
-      "Obrigado por participar do *Mensagens Missionárias*. 💙\n\n" +
-      "Se quiser enviar outra mensagem, digite *menu*."
+      "💌 *Gostaria de receber uma resposta do missionário por e-mail?*\n\n" +
+      "Se desejar, informe seu e-mail. Ele será compartilhado com o missionário escolhido para que possa responder diretamente, caso queira.\n\n" +
+      "Se não quiser, digite *PULAR*.\n\n" +
+      "Essa informação é opcional. Sua mensagem já foi registrada. 💙"
     );
 
     console.log(
@@ -1222,6 +1252,7 @@ async function enviarCompilacoesPendentes() {
         mm.id,
         mm.missionario_id,
         mm.nome_familia,
+        mm.email_resposta,
         mm.mensagem,
         mm.criado_em,
         m.nome
@@ -1339,6 +1370,10 @@ async function enviarCompilacoesPendentes() {
                   "<br>"
                 );
 
+            const emailResposta = item.email_resposta
+              ? `<p style="margin:12px 0 0;font-size:14px;color:#173b57;">📧 Para responder à família: <a href="mailto:${escaparHTML(item.email_resposta)}">${escaparHTML(item.email_resposta)}</a></p>`
+              : "";
+
             const data =
               new Date(
                 item.criado_em
@@ -1382,6 +1417,8 @@ async function enviarCompilacoesPendentes() {
                 >
                   ${mensagem}
                 </p>
+
+                ${emailResposta}
 
                 <p
                   style="
@@ -1627,6 +1664,7 @@ app.get(
             mm.id,
             mm.nome_familia,
             mm.telefone_familia,
+            mm.email_resposta,
             mm.mensagem,
             mm.status,
             mm.criado_em,
@@ -1941,6 +1979,7 @@ app.get(
                     ${escaparHTML(
                       item.mensagem
                     )}
+                    ${item.email_resposta ? `<div style="margin-top:8px;font-size:12px;">📧 Resposta: ${escaparHTML(item.email_resposta)}</div>` : ""}
                   </td>
 
                   <td>
