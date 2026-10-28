@@ -3411,6 +3411,16 @@ async function iniciarServidor() {
 
     await inicializarBanco();
 
+    // Diagnóstico temporário: consulta somente leitura para conferir a migração.
+    const diagnostico = await pool.query(`
+      SELECT
+        current_database() AS banco,
+        COUNT(*) AS quantidade,
+        MAX(id) AS ultimo_id
+      FROM public.mensagens
+    `);
+    console.log("DIAGNOSTICO DO BANCO:", diagnostico.rows[0]);
+
     // Agendamento interno desativado: compilação apenas manual durante os testes.
 
     app.listen(
