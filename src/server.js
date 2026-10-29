@@ -1239,11 +1239,17 @@ async function processarConversa(
 // COMPILAÇÃO DAS MENSAGENS
 // ======================================================
 
-async function enviarCompilacoesPendentes() {
+async function enviarCompilacoesPendentes(idsSelecionados = null) {
   if (!resend) {
     throw new Error(
       "RESEND_API_KEY não configurada."
     );
+  }
+
+  // null mantém o comportamento anterior para eventuais rotinas internas.
+  // No painel manual, uma lista explícita limita o envio aos selecionados.
+  if (idsSelecionados !== null && (!Array.isArray(idsSelecionados) || idsSelecionados.length === 0)) {
+    throw new Error('Selecione pelo menos um missionário.');
   }
 
   const resultado =
@@ -1268,11 +1274,12 @@ async function enviarCompilacoesPendentes() {
 
       WHERE
         mm.status = 'PENDENTE'
+        AND ($1::int[] IS NULL OR mm.missionario_id = ANY($1::int[]))
 
       ORDER BY
         m.id ASC,
         mm.criado_em ASC
-    `);
+    `, [idsSelecionados]);
 
   if (
     resultado.rows.length === 0
@@ -1681,6 +1688,22 @@ app.get(
           ORDER BY
             mm.criado_em DESC
         `);
+
+      const resultadoPendentesPorMissionario = await pool.query(`
+        SELECT m.id, m.nome, m.email, COUNT(mm.id)::int AS quantidade
+        FROM missionarios m
+        JOIN mensagens_missionarios mm ON mm.missionario_id = m.id
+        WHERE mm.status = 'PENDENTE'
+        GROUP BY m.id, m.nome, m.email
+        ORDER BY m.nome ASC
+      `);
+      const opcoesCompilacao = resultadoPendentesPorMissionario.rows.map(m => `
+        <label style="display:flex;align-items:center;gap:10px;margin:9px 0;padding:9px;border:1px solid #dbe5ee;border-radius:8px;cursor:pointer;">
+          <input type="checkbox" name="missionario_ids" value="${Number(m.id)}" style="width:auto;flex:none;">
+          <span><strong>${escaparHTML(m.nome)}</strong> — ${Number(m.quantidade)} pendente(s)
+          ${m.email?.trim() ? '' : '<small style="color:#b45309;">(sem e-mail cadastrado)</small>'}</span>
+        </label>
+      `).join('');
 
       const estatisticas =
         await pool.query(`
@@ -2123,9 +2146,8 @@ app.get(
             </h2>
 
             <p>
-              Envia todas as mensagens
-              <strong>PENDENTES</strong>
-              agrupadas por missionário.
+              Selecione quais missionários receberão suas mensagens
+              <strong>PENDENTES</strong>. Os demais permanecerão pendentes.
             </p>
 
             <p>
@@ -2145,18 +2167,22 @@ app.get(
               action="/admin/enviar-compilacao"
               onsubmit="
                 return confirm(
-                  'Deseja enviar agora todas as mensagens pendentes?'
+                  'Confirma o envio das mensagens pendentes SOMENTE para os missionários selecionados?'
                 );
               "
             >
 
               ${campoCSRF(req)}
+              <p><strong>Missionários com mensagens pendentes:</strong></p>
+              ${opcoesCompilacao || '<p>Nenhum missionário possui mensagens pendentes.</p>'}
+              <p style="font-size:13px;color:#64748b;">Nenhum missionário vem selecionado. Marque apenas quem deseja enviar.</p>
 
               <button
                 class="compilacao"
                 type="submit"
+                ${opcoesCompilacao ? '' : 'disabled'}
               >
-                Enviar compilação agora
+                Enviar para os selecionados
               </button>
 
             </form>
@@ -2390,8 +2416,14 @@ app.post(
         "Iniciando compilação manual..."
       );
 
+      const recebidos = req.body.missionario_ids;
+      const lista = Array.isArray(recebidos) ? recebidos : (recebidos ? [recebidos] : []);
+      const idsSelecionados = [...new Set(lista.filter(v => /^\d+$/.test(String(v)) && Number(v) > 0 && Number.isSafeInteger(Number(v))).map(Number))];
+      if (idsSelecionados.length === 0 || idsSelecionados.length !== lista.length) {
+        return res.status(400).send('Selecione pelo menos um missionário válido. Volte ao painel e tente novamente.');
+      }
       const resultado =
-        await enviarCompilacoesPendentes();
+        await enviarCompilacoesPendentes(idsSelecionados);
 
       console.log(
         "Resultado da compilação:",
